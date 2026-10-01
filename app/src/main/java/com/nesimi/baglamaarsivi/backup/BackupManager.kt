@@ -5,6 +5,7 @@ import android.database.sqlite.SQLiteDatabase
 import android.net.Uri
 import com.nesimi.baglamaarsivi.data.AppDatabase
 import com.nesimi.baglamaarsivi.util.FileManager
+import com.nesimi.baglamaarsivi.util.VideoStore
 import org.json.JSONObject
 import java.io.BufferedInputStream
 import java.io.File
@@ -46,7 +47,22 @@ object BackupManager {
         val mediaFiles = MEDIA_DIRS.flatMap { d ->
             File(context.filesDir, d).walkTopDown().filter { it.isFile }.map { d to it }.toList()
         }
-        val total = dbFile.length() + mediaFiles.sumOf { it.second.length() }
+        // Galerideki (telefonun Filmler klasöründeki) videolar da yedeğe girer
+        data class GalleryVideo(val id: Long, val path: String, val size: Long, val entry: String)
+        val gallery = mutableListOf<GalleryVideo>()
+        try {
+            db.openHelper.readableDatabase.query("SELECT id, localPath, fileSize FROM videolar WHERE localPath LIKE 'content://%'").use { c ->
+                while (c.moveToNext()) {
+                    val id = c.getLong(0)
+                    val path = c.getString(1)
+                    if (!VideoStore.exists(context, path)) continue
+                    val name = VideoStore.displayName(context, path).replace('/', '_')
+                    gallery += GalleryVideo(id, path, c.getLong(2), "g${id}_$name")
+                }
+            }
+        } catch (_: Exception) {
+        }
+        val total = dbFile.length() + mediaFiles.sumOf { it.second.length() } + gallery.sumOf { it.size }
         var done = 0L
         var count = 0
 
@@ -60,7 +76,8 @@ object BackupManager {
                 put("format", 1)
                 put("dbName", AppDatabase.DB_NAME)
                 put("createdAt", System.currentTimeMillis())
-                put("fileCount", mediaFiles.size)
+                put("fileCount", mediaFiles.size + gallery.size)
+                put("gallery", JSONObject().apply { gallery.forEach { g -> put(g.id.toString(), g.entry) } })
                 put("totalBytes", total)
             }
             zip.setLevel(Deflater.DEFAULT_COMPRESSION)
@@ -84,6 +101,14 @@ object BackupManager {
                         onProgress(BackupProgress(f.name, done, total))
                     }
                 }
+                zip.closeEntry()
+                count++
+            }
+            for (g in gallery) {
+                val input = VideoStore.openInput(context, g.path) ?: continue
+                zip.putNextEntry(ZipEntry("files/${FileManager.DIR_VIDEOS}/${g.entry}"))
+                val start = done
+                input.use { copy(it, zip) { n -> done = start + n; onProgress(BackupProgress(g.entry.substringAfter('_'), done, total)) } }
                 zip.closeEntry()
                 count++
             }
@@ -142,9 +167,26 @@ object BackupManager {
 
             // WAL'ı birleştir, sürümü ve sayıları kontrol et
             var turkus = 0; var videos = 0; var docs = 0
+            val manifest = try { File(staging, "manifest.json").takeIf { it.exists() }?.readText()?.let { JSONObject(it) } } catch (_: Exception) { null }
             val sdb = SQLiteDatabase.openDatabase(stagedDb.absolutePath, null, SQLiteDatabase.OPEN_READWRITE)
             try {
                 if (sdb.version > 4) throw IllegalArgumentException("Bu yedek uygulamanın daha yeni bir sürümüyle alınmış. Önce uygulamayı güncelleyin.")
+                // Galeri videoları: bu telefonda hâlâ duruyorsa yedekteki kopyayı at, yoksa yedekteki kopyayı kullan
+                manifest?.optJSONObject("gallery")?.let { g ->
+                    val keys = g.keys()
+                    while (keys.hasNext()) {
+                        val id = keys.next()
+                        val entry = g.optString(id)
+                        val staged = File(staging, "files/${FileManager.DIR_VIDEOS}/$entry")
+                        val path = sdb.rawQuery("SELECT localPath FROM videolar WHERE id = ?", arrayOf(id)).use { c -> if (c.moveToFirst()) c.getString(0) else null }
+                        if (path != null && VideoStore.exists(context, path)) {
+                            staged.delete()
+                        } else if (staged.exists()) {
+                            val finalPath = File(File(context.filesDir, FileManager.DIR_VIDEOS), entry).absolutePath
+                            sdb.execSQL("UPDATE videolar SET localPath = ? WHERE id = ?", arrayOf<Any>(finalPath, id.toLong()))
+                        }
+                    }
+                }
                 turkus = count(sdb, "turkuler")
                 videos = count(sdb, "videolar")
                 docs = count(sdb, "belgeler")
@@ -183,6 +225,7 @@ object BackupManager {
         var p = rawPath.replace('\\', '/').trimStart('/')
         while (p.startsWith("./")) p = p.substring(2)
         if (p.split('/').any { it == ".." }) return null
+        if (p == "manifest.json") return File(staging, "manifest.json")
         // "data/data/paket/databases/x.db" gibi uzun yolları da kabul et
         val dbIdx = if (p.startsWith("databases/")) 0 else p.indexOf("/databases/").let { if (it >= 0) it + 1 else -1 }
         val fIdx = if (p.startsWith("files/")) 0 else p.indexOf("/files/").let { if (it >= 0) it + 1 else -1 }

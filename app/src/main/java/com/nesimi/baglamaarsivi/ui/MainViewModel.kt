@@ -23,6 +23,8 @@ import com.nesimi.baglamaarsivi.util.FileManager
 import com.nesimi.baglamaarsivi.util.Metronome
 import com.nesimi.baglamaarsivi.util.StorageStats
 import com.nesimi.baglamaarsivi.util.Tr
+import com.nesimi.baglamaarsivi.util.PracticeTimer
+import com.nesimi.baglamaarsivi.util.TimerState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -181,6 +183,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     init {
+        PracticeTimer.load(app)
+        com.nesimi.baglamaarsivi.util.TimerService.channels(app)
         viewModelScope.launch {
             runCatching { repo.purgeOldTrash() }
             refreshStorage()
@@ -259,13 +263,19 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun restoreTurku(id: Long) = viewModelScope.launch { repo.restoreTurku(id); toast("Geri yüklendi") }
     fun restoreVideo(id: Long) = viewModelScope.launch { repo.restoreVideo(id); toast("Geri yüklendi") }
     fun restoreDoc(id: Long) = viewModelScope.launch { repo.restoreDoc(id); toast("Geri yüklendi") }
-    fun deleteTurkuForever(id: Long) = viewModelScope.launch { repo.deleteTurkuForever(id); refreshStorage(); toast("Kalıcı olarak silindi") }
-    fun deleteVideoForever(v: VideoItem) = viewModelScope.launch { repo.deleteVideoForever(v); refreshStorage(); toast("Kalıcı olarak silindi") }
+    fun deleteTurkuForever(id: Long, deleteFiles: Boolean = false) = viewModelScope.launch {
+        repo.deleteTurkuForever(id, deleteFiles); refreshStorage()
+        toast(if (deleteFiles) "Türkü ve videoları silindi" else "Arşivden çıkarıldı (videolar telefonda duruyor)")
+    }
+    fun deleteVideoForever(v: VideoItem, deleteFile: Boolean = false) = viewModelScope.launch {
+        repo.deleteVideoForever(v, deleteFile); refreshStorage()
+        toast(if (deleteFile) "Video telefondan da silindi" else "Arşivden çıkarıldı (video telefonda duruyor)")
+    }
     fun deleteDocForever(d: DocumentItem) = viewModelScope.launch { repo.deleteDocForever(d); refreshStorage(); toast("Kalıcı olarak silindi") }
-    fun emptyTrash() = viewModelScope.launch {
-        deletedVideos.value.forEach { repo.deleteVideoForever(it) }
+    fun emptyTrash(deleteFiles: Boolean = false) = viewModelScope.launch {
+        deletedVideos.value.forEach { repo.deleteVideoForever(it, deleteFiles) }
         deletedDocs.value.forEach { repo.deleteDocForever(it) }
-        deletedTurkus.value.forEach { repo.deleteTurkuForever(it.id) }
+        deletedTurkus.value.forEach { repo.deleteTurkuForever(it.id, deleteFiles) }
         refreshStorage()
         toast("Çöp kutusu boşaltıldı")
     }
@@ -276,19 +286,31 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val _busy = MutableStateFlow<BusyState?>(null)
     val busy: StateFlow<BusyState?> = _busy.asStateFlow()
 
+    // Orijinalleri silme (WhatsApp vb.) – içe aktarmadan sonra kullanıcıya sorulur
+    private val _pendingOriginals = MutableStateFlow<List<Pair<String, Long>>>(emptyList())
+    val pendingOriginals: StateFlow<List<Pair<String, Long>>> = _pendingOriginals.asStateFlow()
+    fun clearPendingOriginals() { _pendingOriginals.value = emptyList() }
+
+    var deleteOriginalsPref: Boolean
+        get() = prefs.getBoolean("orijinal_sil", true)
+        set(v) { prefs.edit().putBoolean("orijinal_sil", v).apply() }
+
     fun importVideos(
         items: List<StagedVideo>, turkuId: Long, lessonDate: String, instructor: String,
-        description: String, tags: String, status: StudyStatus?, favorite: Boolean, onDone: () -> Unit
+        description: String, tags: String, status: StudyStatus?, favorite: Boolean,
+        deleteOriginals: Boolean = false, onDone: () -> Unit
     ) {
         viewModelScope.launch {
             var ok = 0
             val dups = mutableListOf<String>()
+            val sources = mutableListOf<Pair<String, Long>>()
             items.forEachIndexed { i, it ->
                 _busy.value = BusyState("Video kaydediliyor ${i + 1}/${items.size}", BackupProgress(it.title, i.toLong(), items.size.toLong()))
                 try {
                     val r = repo.importVideo(it.uri, turkuId, it.title, lessonDate, instructor, description, tags, it.orderTag, i + 1, favorite)
                     ok++
                     r.duplicateOf?.let { d -> dups += d }
+                    r.source?.let { src -> sources += src }
                 } catch (e: Exception) {
                     toast("“${it.title}” kaydedilemedi: ${e.message}")
                 }
@@ -298,6 +320,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             refreshStorage()
             toast(if (dups.isEmpty()) "$ok video arşive eklendi ✅" else "$ok video eklendi. Uyarı: ${dups.size} tanesi daha önce de eklenmiş olabilir.")
             onDone()
+            if (deleteOriginals && sources.isNotEmpty() && com.nesimi.baglamaarsivi.util.VideoStore.galleryEnabled) _pendingOriginals.value = sources
         }
     }
 
@@ -316,6 +339,22 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             refreshStorage()
             toast("$ok belge arşive eklendi ✅")
             onDone()
+        }
+    }
+
+    private val _internalVideos = MutableStateFlow(0)
+    val internalVideos: StateFlow<Int> = _internalVideos.asStateFlow()
+    fun refreshInternalVideos() { viewModelScope.launch { _internalVideos.value = repo.internalVideoCount() } }
+
+    fun moveVideosToGallery() {
+        viewModelScope.launch {
+            _busy.value = BusyState("Videolar telefonun galerisine taşınıyor…")
+            val n = repo.moveInternalVideosToGallery { i, total ->
+                _busy.value = BusyState("Videolar galeriye taşınıyor $i/$total", BackupProgress("", i.toLong(), total.toLong()))
+            }
+            _busy.value = null
+            refreshStorage(); refreshInternalVideos()
+            toast("$n video Filmler/Bağlama Arşivi klasörüne taşındı ✅")
         }
     }
 
@@ -365,37 +404,53 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    // ---------------------------------------------------------------- Çalışma (süre tutucu)
-    private val _practiceStart = MutableStateFlow(prefs.getLong("calisma_baslangic", 0L))
-    val practiceStart: StateFlow<Long> = _practiceStart.asStateFlow()
-    private val _practiceTurku = MutableStateFlow<Long?>(prefs.getLong("calisma_turku", 0L).takeIf { it > 0 })
-    val practiceTurku: StateFlow<Long?> = _practiceTurku.asStateFlow()
+    // ---------------------------------------------------------------- Çalışma sayacı (ileri / geri sayım)
+    private val ctx: Context get() = getApplication()
+    val timer: StateFlow<TimerState> = PracticeTimer.state
 
-    fun selectPracticeTurku(id: Long?) {
-        _practiceTurku.value = id
-        prefs.edit().putLong("calisma_turku", id ?: 0L).apply()
+    /** Geriye uyumluluk: sayaç çalışıyorsa başlangıç zamanı (>0), değilse 0 */
+    val practiceStart: StateFlow<Long> = timer.map { if (it.isActive && !it.finished) it.startedAt.coerceAtLeast(1) else 0L }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, 0L)
+    val practiceTurku: StateFlow<Long?> = timer.map { it.turkuId }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    var lastCountdownMinutes: Int
+        get() = prefs.getInt("geri_sayim_dk", 10)
+        set(v) { prefs.edit().putInt("geri_sayim_dk", v).apply() }
+
+    fun selectPracticeTurku(id: Long?) = PracticeTimer.setTurku(ctx, id)
+
+    /** [minutes] null ise ileri sayım (kronometre), değilse geri sayım. */
+    fun startPractice(turkuId: Long?, minutes: Int? = null) {
+        if (timer.value.isActive) return
+        if (minutes != null) lastCountdownMinutes = minutes
+        PracticeTimer.start(ctx, turkuId, minutes)
+        toast(if (minutes != null) "$minutes dakikalık çalışma başladı ⏳" else "Çalışma başladı ⏱️")
     }
 
-    fun startPractice(turkuId: Long?) {
-        if (_practiceStart.value > 0) return
-        selectPracticeTurku(turkuId)
-        val now = System.currentTimeMillis()
-        _practiceStart.value = now
-        prefs.edit().putLong("calisma_baslangic", now).apply()
-        toast("Çalışma başladı ⏱️")
-    }
+    fun pausePractice() = PracticeTimer.pause(ctx)
+    /** Servis bir sebeple çalışmadıysa, ekran açıkken süre bitince yine de bitmiş say. */
+    fun timerExpired() { if (!timer.value.finished) PracticeTimer.markFinished(ctx) }
+    fun resumePractice() = PracticeTimer.resume(ctx)
 
-    fun stopPractice(note: String = "") {
-        val start = _practiceStart.value
-        if (start <= 0) return
-        val sec = (System.currentTimeMillis() - start) / 1000
-        _practiceStart.value = 0
-        prefs.edit().putLong("calisma_baslangic", 0L).apply()
-        if (sec < 20) { toast("Çok kısa sürdü, kaydedilmedi"); return }
+    /** Sayacı durdurur; ardından "Kaydet / Kaydetme" sorulur. */
+    fun stopPractice() = PracticeTimer.finish(ctx)
+
+    fun savePractice(note: String) {
+        val s = timer.value
+        val sec = s.elapsed() / 1000
+        com.nesimi.baglamaarsivi.util.TimerService.stopAlarm()
+        PracticeTimer.reset(ctx)
+        if (sec < 10) { toast("Çok kısa sürdü, kaydedilmedi"); return }
         viewModelScope.launch {
-            repo.addPractice(_practiceTurku.value, start, sec, note)
+            repo.addPractice(s.turkuId, s.startedAt.takeIf { it > 0 } ?: (System.currentTimeMillis() - sec * 1000), sec, note)
             toast("${Tr.practice(sec)} çalışma kaydedildi 👏")
         }
+    }
+
+    fun discardPractice() {
+        com.nesimi.baglamaarsivi.util.TimerService.stopAlarm()
+        PracticeTimer.reset(ctx)
+        toast("Çalışma kaydedilmedi")
     }
 
     fun addManualPractice(turkuId: Long?, minutes: Int, note: String) = viewModelScope.launch {

@@ -2,6 +2,7 @@ package com.nesimi.baglamaarsivi.ui.components
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -63,6 +64,14 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
 import coil.compose.AsyncImage
 import com.nesimi.baglamaarsivi.data.DocumentItem
 import com.nesimi.baglamaarsivi.data.StudyStatus
@@ -221,7 +230,9 @@ fun VideoCard(
     onOrderClick: (() -> Unit)? = null,
     onFavorite: (() -> Unit)? = null,
     onEdit: (() -> Unit)? = null,
-    onDelete: (() -> Unit)? = null
+    onDelete: (() -> Unit)? = null,
+    onOrderChange: ((String) -> Unit)? = null,
+    orderSuggestion: String = ""
 ) {
     val dark = LocalIsDark.current
     val style = SectionColors.forTag(video.displayOrderTag, dark)
@@ -239,7 +250,9 @@ fun VideoCard(
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     val tag = video.displayOrderTag
-                    Surface(
+                    if (onOrderChange != null) {
+                        OrderTagField(tag, orderSuggestion, style.badgeBg, style.badgeText, onOrderChange)
+                    } else Surface(
                         shape = RoundedCornerShape(6.dp),
                         color = style.badgeBg,
                         modifier = if (onOrderClick != null) Modifier.clickable { onOrderClick() } else Modifier
@@ -413,4 +426,55 @@ fun BusyOverlay(state: BusyState) {
             }
         }
     }
+}
+
+
+/**
+ * Kartın üstünde doğrudan yazılabilen sıra numarası kutusu (ör. 1.1, 1.2, 2.1).
+ * Klavyede "Tamam"a basınca veya kutudan çıkınca kaydedilir; video otomatik olarak yerine kayar.
+ */
+@Composable
+fun OrderTagField(tag: String, suggestion: String, bg: Color, fg: Color, onCommit: (String) -> Unit) {
+    val focus = LocalFocusManager.current
+    var value by remember(tag) { mutableStateOf(TextFieldValue(tag)) }
+    var focused by remember { mutableStateOf(false) }
+    var prefill by remember { mutableStateOf<String?>(null) }
+    fun normalized() = value.text.trim().replace(',', '.').removePrefix("#").trim()
+    fun commit() {
+        val n = normalized()
+        if (n != tag) onCommit(n)
+    }
+    BasicTextField(
+        value = value,
+        onValueChange = { v -> value = v.copy(text = v.text.filter { it.isDigit() || it == '.' || it == ',' || it == '/' || it == '-' }.take(8)) },
+        singleLine = true,
+        textStyle = TextStyle(color = fg, fontWeight = FontWeight.Bold, fontSize = 14.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center),
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Done),
+        keyboardActions = KeyboardActions(onDone = { commit(); focus.clearFocus() }),
+        cursorBrush = androidx.compose.ui.graphics.SolidColor(fg),
+        modifier = Modifier
+            .width(64.dp)
+            .background(bg, RoundedCornerShape(8.dp))
+            .border(if (focused) 2.dp else 0.dp, if (focused) fg else Color.Transparent, RoundedCornerShape(8.dp))
+            .padding(horizontal = 4.dp, vertical = 5.dp)
+            .onFocusChanged { st ->
+                if (st.isFocused && !focused) {
+                    if (value.text.isBlank() && suggestion.isNotBlank()) {
+                        prefill = suggestion
+                        value = TextFieldValue(suggestion, TextRange(suggestion.length))
+                    }
+                } else if (!st.isFocused && focused) {
+                    // Önerilen numaraya hiç dokunulmadıysa kaydetme
+                    if (prefill != null && value.text == prefill) value = TextFieldValue(tag) else commit()
+                    prefill = null
+                }
+                focused = st.isFocused
+            },
+        decorationBox = { inner ->
+            Box(contentAlignment = Alignment.Center) {
+                if (value.text.isEmpty()) Text("No", color = fg.copy(alpha = 0.5f), fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                inner()
+            }
+        }
+    )
 }

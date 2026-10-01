@@ -106,6 +106,7 @@ fun ImportScreen(vm: MainViewModel, screen: Screen.Import) {
     var tags by remember { mutableStateOf("") }
     var status by remember { mutableStateOf<StudyStatus?>(null) }
     var fav by remember { mutableStateOf(false) }
+    var deleteOriginals by remember { mutableStateOf(vm.deleteOriginalsPref) }
     var category by remember { mutableStateOf(DocumentCategory.NOTA) }
     var prefixDialog by remember { mutableStateOf(false) }
 
@@ -213,6 +214,16 @@ fun ImportScreen(vm: MainViewModel, screen: Screen.Import) {
                     Text("⭐ Favorilere ekle", modifier = Modifier.weight(1f))
                     Switch(checked = fav, onCheckedChange = { fav = it })
                 }
+                if (isVideo && com.nesimi.baglamaarsivi.util.VideoStore.galleryEnabled) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("🧹 Sonra orijinalleri silmeyi sor")
+                            Text("Videolar Filmler/Bağlama Arşivi klasörüne kaydedilir. WhatsApp'taki kopyayı silersen tek kopya kalır; istersen \"Silme\" diyebilirsin.",
+                                fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Switch(checked = deleteOriginals, onCheckedChange = { deleteOriginals = it; vm.deleteOriginalsPref = it })
+                    }
+                }
                 Spacer(Modifier.height(8.dp))
                 Button(
                     enabled = canSave,
@@ -225,7 +236,7 @@ fun ImportScreen(vm: MainViewModel, screen: Screen.Import) {
                                 if (target == null) return@launch
                                 vm.importVideos(
                                     items.map { MainViewModel.StagedVideo(it.uri, it.title.trim(), it.order.trim()) },
-                                    target, lessonDate.trim(), instructor, desc, tags, status, fav
+                                    target, lessonDate.trim(), instructor, desc, tags, status, fav, deleteOriginals
                                 ) { vm.back(); vm.navigate(Screen.TurkuDetail(target)) }
                             } else {
                                 vm.importDocuments(items.map { it.uri to it.title.trim() }, target, category, fav) { vm.back() }

@@ -20,6 +20,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Stop
@@ -48,6 +49,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -81,18 +83,14 @@ fun PracticeScreen(vm: MainViewModel) {
     val turkus by vm.turkus.collectAsStateWithLifecycle()
     val stats by vm.practiceStats.collectAsStateWithLifecycle()
     val sessions by vm.sessions.collectAsStateWithLifecycle()
-    val start by vm.practiceStart.collectAsStateWithLifecycle()
     val selTurku by vm.practiceTurku.collectAsStateWithLifecycle()
     val running by vm.metroRunning.collectAsStateWithLifecycle()
     val bpm by vm.metroBpm.collectAsStateWithLifecycle()
     val beats by vm.metroBeats.collectAsStateWithLifecycle()
     val beat by vm.metroBeat.collectAsStateWithLifecycle()
-    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
-    var expanded by remember { mutableStateOf(false) }
     var manual by remember { mutableStateOf(false) }
     val names = remember(turkus) { turkus.associate { it.turku.id to it.turku.name } }
 
-    LaunchedEffect(start) { while (start > 0) { now = System.currentTimeMillis(); delay(500) } }
 
     LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item { Text("Çalışma Köşesi", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold) }
@@ -103,37 +101,8 @@ fun PracticeScreen(vm: MainViewModel) {
                 StatTile("🔥 ${stats.streakDays}", "Gün seri", Modifier.weight(1f), color = Color(0xFFE0571B))
             }
         }
-        // Süre tutucu
-        item {
-            Card(shape = RoundedCornerShape(18.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
-                Column(Modifier.padding(16.dp).fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("⏱️ Çalışma süresi", fontWeight = FontWeight.Bold)
-                    Text(if (start > 0) Tr.duration(now - start) else "00:00", fontSize = 46.sp, fontWeight = FontWeight.ExtraBold)
-                    ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { if (start == 0L) expanded = it }) {
-                        OutlinedTextField(
-                            value = selTurku?.let { names[it] } ?: "Genel çalışma (türkü seçilmedi)",
-                            onValueChange = {}, readOnly = true, label = { Text("Ne çalışıyorsun?") },
-                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
-                            modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryNotEditable)
-                        )
-                        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                            DropdownMenuItem(text = { Text("Genel çalışma") }, onClick = { vm.selectPracticeTurku(null); expanded = false })
-                            turkus.forEach { tw -> DropdownMenuItem(text = { Text(tw.turku.name) }, onClick = { vm.selectPracticeTurku(tw.turku.id); expanded = false }) }
-                        }
-                    }
-                    Spacer(Modifier.height(10.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        if (start > 0) {
-                            Button(onClick = { vm.stopPractice() }) { Icon(Icons.Default.Stop, null); Spacer(Modifier.width(4.dp)); Text("Bitir ve Kaydet") }
-                        } else {
-                            Button(onClick = { vm.startPractice(selTurku) }) { Icon(Icons.Default.PlayArrow, null); Spacer(Modifier.width(4.dp)); Text("Başlat") }
-                            OutlinedButton(onClick = { manual = true }) { Text("Elle ekle") }
-                        }
-                    }
-                    Text("Uygulamayı kapatsan da süre işlemeye devam eder.", fontSize = 11.sp, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f))
-                }
-            }
-        }
+        // Süre tutucu (ileri / geri sayım)
+        item { TimerCard(vm, names) }
         // Metronom
         item {
             Card(shape = RoundedCornerShape(18.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
@@ -149,13 +118,18 @@ fun PracticeScreen(vm: MainViewModel) {
                         }
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        FilledIconButton(onClick = { vm.setBpm(bpm - 1) }) { Icon(Icons.Default.Remove, "Azalt") }
-                        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(horizontal = 18.dp)) {
-                            Text("$bpm", fontSize = 48.sp, fontWeight = FontWeight.ExtraBold)
-                            Text("BPM • ${tempoName(bpm)}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        OutlinedButton(onClick = { vm.setBpm(bpm - 5) }, contentPadding = PaddingValues(horizontal = 10.dp)) { Text("−5", fontWeight = FontWeight.Bold) }
+                        Spacer(Modifier.width(4.dp))
+                        FilledIconButton(onClick = { vm.setBpm(bpm - 1) }) { Icon(Icons.Default.Remove, "1 azalt") }
+                        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(horizontal = 10.dp)) {
+                            Text("$bpm", fontSize = 44.sp, fontWeight = FontWeight.ExtraBold)
+                            Text("BPM", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
-                        FilledIconButton(onClick = { vm.setBpm(bpm + 1) }) { Icon(Icons.Default.Add, "Artır") }
+                        FilledIconButton(onClick = { vm.setBpm(bpm + 1) }) { Icon(Icons.Default.Add, "1 artır") }
+                        Spacer(Modifier.width(4.dp))
+                        OutlinedButton(onClick = { vm.setBpm(bpm + 5) }, contentPadding = PaddingValues(horizontal = 10.dp)) { Text("+5", fontWeight = FontWeight.Bold) }
                     }
+                    Text(tempoName(bpm), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Slider(value = bpm.toFloat(), onValueChange = { vm.setBpm(it.toInt()) }, valueRange = 30f..260f)
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         items(listOf(60, 70, 80, 90, 100, 120, 140)) { b -> FilterChip(selected = bpm == b, onClick = { vm.setBpm(b) }, label = { Text("$b") }) }
@@ -213,4 +187,144 @@ fun PracticeScreen(vm: MainViewModel) {
             dismissButton = { TextButton(onClick = { manual = false }) { Text("Vazgeç") } }
         )
     }
+}
+
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun TimerCard(vm: MainViewModel, names: Map<Long, String>) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val turkus by vm.turkus.collectAsStateWithLifecycle()
+    val t by vm.timer.collectAsStateWithLifecycle()
+    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    var countdownMode by remember { mutableStateOf(true) }
+    var minutes by remember { mutableIntStateOf(vm.lastCountdownMinutes) }
+    var expanded by remember { mutableStateOf(false) }
+    LaunchedEffect(t.isRunning, t.runningSince) {
+        while (t.isRunning) {
+            now = System.currentTimeMillis()
+            if (t.countdown && t.remaining(now) <= 0) { vm.timerExpired(); break }
+            delay(250)
+        }
+        now = System.currentTimeMillis()
+    }
+
+    val notifLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
+    ) { vm.startPractice(t.turkuId, minutes) }
+
+    fun startCountdown() {
+        if (android.os.Build.VERSION.SDK_INT >= 33 &&
+            androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) notifLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+        else vm.startPractice(t.turkuId, minutes)
+    }
+
+    Card(shape = RoundedCornerShape(18.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
+        Column(Modifier.padding(16.dp).fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+            val active = t.isActive && !t.finished
+            if (!active) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(selected = countdownMode, onClick = { countdownMode = true }, label = { Text("⏳ Geri sayım") })
+                    FilterChip(selected = !countdownMode, onClick = { countdownMode = false }, label = { Text("⏱️ Serbest") })
+                }
+            } else {
+                val head = if (t.countdown) "⏳ Geri sayım" else "⏱️ Çalışma süresi"
+                val suffix = if (t.isRunning) "" else " (duraklatıldı)"
+                Text(head + suffix, fontWeight = FontWeight.Bold)
+            }
+            val big = when {
+                active && t.countdown -> Tr.duration(t.remaining(now))
+                active -> Tr.duration(t.elapsed(now))
+                countdownMode -> Tr.duration(minutes * 60_000L)
+                else -> "00:00"
+            }
+            Text(big, fontSize = 52.sp, fontWeight = FontWeight.ExtraBold)
+            if (active && t.countdown) {
+                androidx.compose.material3.LinearProgressIndicator(
+                    progress = { if (t.targetMs > 0) t.elapsed(now).toFloat() / t.targetMs else 0f },
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp)
+                )
+            }
+            if (!active && countdownMode) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedButton(onClick = { minutes = (minutes - 5).coerceAtLeast(1) }, contentPadding = PaddingValues(horizontal = 10.dp)) { Text("−5") }
+                    IconButton(onClick = { minutes = (minutes - 1).coerceAtLeast(1) }) { Icon(Icons.Default.Remove, "1 dk azalt") }
+                    Text("$minutes dk", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                    IconButton(onClick = { minutes = (minutes + 1).coerceAtMost(240) }) { Icon(Icons.Default.Add, "1 dk artır") }
+                    OutlinedButton(onClick = { minutes = (minutes + 5).coerceAtMost(240) }, contentPadding = PaddingValues(horizontal = 10.dp)) { Text("+5") }
+                }
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    items(listOf(5, 10, 15, 20, 30, 45, 60)) { m -> FilterChip(selected = minutes == m, onClick = { minutes = m }, label = { Text("$m dk") }) }
+                }
+            }
+            Spacer(Modifier.height(6.dp))
+            ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = it }) {
+                OutlinedTextField(
+                    value = t.turkuId?.let { names[it] } ?: "Genel çalışma (türkü seçilmedi)",
+                    onValueChange = {}, readOnly = true, label = { Text("Ne çalışıyorsun?") },
+                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
+                    modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryNotEditable)
+                )
+                ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                    DropdownMenuItem(text = { Text("Genel çalışma") }, onClick = { vm.selectPracticeTurku(null); expanded = false })
+                    turkus.forEach { tw -> DropdownMenuItem(text = { Text(tw.turku.name) }, onClick = { vm.selectPracticeTurku(tw.turku.id); expanded = false }) }
+                }
+            }
+            Spacer(Modifier.height(10.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                when {
+                    !active -> Button(onClick = { if (countdownMode) startCountdown() else vm.startPractice(t.turkuId, null) }, modifier = Modifier.height(48.dp)) {
+                        Icon(Icons.Default.PlayArrow, null); Spacer(Modifier.width(4.dp)); Text("Başlat", fontWeight = FontWeight.Bold)
+                    }
+                    t.isRunning -> {
+                        FilledTonalButton(onClick = { vm.pausePractice() }, modifier = Modifier.height(48.dp)) {
+                            Icon(Icons.Default.Pause, null); Spacer(Modifier.width(4.dp)); Text("Duraklat")
+                        }
+                        Button(onClick = { vm.stopPractice() }, modifier = Modifier.height(48.dp)) {
+                            Icon(Icons.Default.Stop, null); Spacer(Modifier.width(4.dp)); Text("Bitir")
+                        }
+                    }
+                    else -> {
+                        Button(onClick = { vm.resumePractice() }, modifier = Modifier.height(48.dp)) {
+                            Icon(Icons.Default.PlayArrow, null); Spacer(Modifier.width(4.dp)); Text("Devam")
+                        }
+                        OutlinedButton(onClick = { vm.stopPractice() }, modifier = Modifier.height(48.dp)) {
+                            Icon(Icons.Default.Stop, null); Spacer(Modifier.width(4.dp)); Text("Bitir")
+                        }
+                    }
+                }
+            }
+            Text(
+                if (countdownMode || t.countdown) "Süre dolunca alarm çalar (uygulama kapalı olsa da). Bitir'e basınca kaydedip kaydetmeyeceğin sorulur."
+                else "Bitir'e basınca kaydedip kaydetmeyeceğin sorulur.",
+                fontSize = 11.sp, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.75f),
+                modifier = Modifier.padding(top = 6.dp)
+            )
+        }
+    }
+}
+
+/** Sayaç bittiğinde (elle veya süre dolunca) her ekranda çıkan kaydet / kaydetme sorusu. */
+@Composable
+fun PracticeFinishDialog(vm: MainViewModel) {
+    val t by vm.timer.collectAsStateWithLifecycle()
+    val turkus by vm.turkus.collectAsStateWithLifecycle()
+    if (!t.finished) return
+    var note by remember { mutableStateOf("") }
+    val name = t.turkuId?.let { id -> turkus.firstOrNull { it.turku.id == id }?.turku?.name } ?: "Genel çalışma"
+    AlertDialog(
+        onDismissRequest = {},
+        title = { Text(if (t.countdown) "⏰ Süre doldu!" else "Çalışma bitti") },
+        text = {
+            Column {
+                Text("${Tr.practice(t.accumulatedMs / 1000)} • $name", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                Spacer(Modifier.height(8.dp))
+                Text("Bu çalışmayı kayıtlarına eklemek ister misin?")
+                OutlinedTextField(note, { note = it }, label = { Text("Not (isteğe bağlı)") }, singleLine = true, modifier = Modifier.padding(top = 6.dp))
+            }
+        },
+        confirmButton = { Button(onClick = { vm.savePractice(note.trim()) }) { Text("Kaydet") } },
+        dismissButton = { TextButton(onClick = { vm.discardPractice() }) { Text("Kaydetme") } }
+    )
 }

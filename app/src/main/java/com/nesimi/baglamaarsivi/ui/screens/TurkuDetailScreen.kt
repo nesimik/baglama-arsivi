@@ -82,6 +82,9 @@ import com.nesimi.baglamaarsivi.ui.theme.FavGold
 import com.nesimi.baglamaarsivi.util.DocumentOpener
 import com.nesimi.baglamaarsivi.util.FileManager
 import com.nesimi.baglamaarsivi.util.Tr
+import com.nesimi.baglamaarsivi.util.VideoOrder
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.size
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -187,18 +190,25 @@ fun TurkuDetailScreen(vm: MainViewModel, turkuId: Long) {
                     } else {
                         item {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text("💡 Rozete dokunup sıra numarası ver; aynı numaralılar aynı renkte görünür.", fontSize = 12.sp,
+                                Text("💡 Kartın solundaki kutuya numara yaz (1.1, 1.2, 2.1…). Video kendi yerine kayar; aynı bölümdekiler aynı renkte.", fontSize = 12.sp,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
                                 IconButton(onClick = { confirmRenumber = true }) { Icon(Icons.Default.FormatListNumbered, "Yeniden numaralandır") }
                             }
                         }
                     }
-                    items(videos, key = { it.id }) { v ->
-                        VideoCard(
-                            v, onClick = { vm.navigate(Screen.Player(v.id)) },
-                            onOrderClick = { orderFor = v }, onFavorite = { vm.toggleVideoFavorite(v) },
-                            onEdit = { editVideo = v }, onDelete = { vm.deleteVideo(v.id) }
-                        )
+                    val suggestion = nextOrderSuggestion(videos)
+                    val groups = videos.groupBy { VideoOrder.section(it.displayOrderTag) }
+                    groups.forEach { (section, list) ->
+                        item(key = "h$section") { GroupHeader(section, list.size, Modifier.animateItem()) }
+                        items(list, key = { it.id }) { v ->
+                            VideoCard(
+                                v, onClick = { vm.navigate(Screen.Player(v.id)) },
+                                modifier = Modifier.animateItem(),
+                                onOrderClick = { orderFor = v }, onFavorite = { vm.toggleVideoFavorite(v) },
+                                onEdit = { editVideo = v }, onDelete = { vm.deleteVideo(v.id) },
+                                onOrderChange = { vm.setVideoOrderTag(v.id, it) }, orderSuggestion = suggestion
+                            )
+                        }
                     }
                 }
                 1 -> {
@@ -314,4 +324,28 @@ fun VideoEditDialog(vm: MainViewModel, v: VideoItem, onDismiss: () -> Unit) {
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Vazgeç") } }
     )
+}
+
+
+/** Boş numaralı videolar için önerilen sıradaki numara: son numara 2.3 ise 2.4 */
+fun nextOrderSuggestion(videos: List<VideoItem>): String {
+    val last = videos.filter { it.displayOrderTag.isNotBlank() }.maxWithOrNull(VideoOrder) ?: return "1.1"
+    val tag = last.displayOrderTag.replace(',', '.')
+    val parts = tag.split('.', '/', '-').filter { it.isNotBlank() }
+    val major = parts.getOrNull(0)?.toIntOrNull() ?: return "1.1"
+    val minor = parts.getOrNull(1)?.toIntOrNull()
+    return if (minor != null) "$major.${minor + 1}" else "$major.1"
+}
+
+@Composable
+fun GroupHeader(section: Int?, count: Int, modifier: Modifier = Modifier) {
+    val dark = com.nesimi.baglamaarsivi.ui.theme.LocalIsDark.current
+    val style = com.nesimi.baglamaarsivi.util.SectionColors.forSection(section, dark)
+    Row(modifier.fillMaxWidth().padding(top = 10.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(width = 6.dp, height = 22.dp).background(style.border, RoundedCornerShape(3.dp)))
+        Spacer(Modifier.width(8.dp))
+        Text(if (section == null) "Numarasız" else "${section}. Bölüm", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+        Text("  •  $count video", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (section == null) Text("  (numara ver, yerine geçsin)", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
 }

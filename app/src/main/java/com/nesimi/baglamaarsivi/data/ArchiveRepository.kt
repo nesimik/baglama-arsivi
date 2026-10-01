@@ -5,6 +5,7 @@ import android.net.Uri
 import com.nesimi.baglamaarsivi.util.FileManager
 import com.nesimi.baglamaarsivi.util.Tr
 import com.nesimi.baglamaarsivi.util.VideoOrder
+import com.nesimi.baglamaarsivi.util.VideoStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
@@ -58,10 +59,9 @@ class ArchiveRepository(private val context: Context) {
     suspend fun restoreTurku(id: Long) = turkuDao.restore(id)
     suspend fun reorderTurkus(ordered: List<Turku>) = ordered.forEachIndexed { i, t -> turkuDao.setOrder(t.id, i) }
 
-    suspend fun deleteTurkuForever(id: Long) {
-        for (v in videoDao.allVideosForTurkuSync(id)) {
-            FileManager.delete(v.localPath); FileManager.delete(v.thumbnailPath)
-        }
+    /** [deleteGalleryFiles]=false ise galerideki videolar telefonda kalır, sadece arşivden çıkar. */
+    suspend fun deleteTurkuForever(id: Long, deleteGalleryFiles: Boolean = false) {
+        for (v in videoDao.allVideosForTurkuSync(id)) removeVideoFiles(v, deleteGalleryFiles)
         for (d in docDao.allDocsForTurkuSync(id)) FileManager.delete(d.localPath)
         turkuDao.deleteForever(id)
     }
@@ -85,40 +85,72 @@ class ArchiveRepository(private val context: Context) {
         videoDao.setOrderTag(id, clean, num)
     }
 
-    suspend fun deleteVideoForever(v: VideoItem) {
-        FileManager.delete(v.localPath); FileManager.delete(v.thumbnailPath)
+    suspend fun deleteVideoForever(v: VideoItem, deleteGalleryFile: Boolean = false) {
+        removeVideoFiles(v, deleteGalleryFile)
         videoDao.deleteForever(v.id)
     }
 
-    data class ImportResult(val id: Long, val duplicateOf: String?)
+    private fun removeVideoFiles(v: VideoItem, deleteGalleryFile: Boolean) {
+        FileManager.delete(v.thumbnailPath)
+        if (!VideoStore.isContent(v.localPath) || deleteGalleryFile) VideoStore.delete(context, v.localPath)
+    }
+
+    data class ImportResult(val id: Long, val duplicateOf: String?, val source: Pair<String, Long>? = null)
 
     suspend fun importVideo(
         uri: Uri, turkuId: Long, title: String, lessonDate: String, instructor: String,
         description: String, tags: String, orderTag: String, uploadOrder: Int, favorite: Boolean
     ): ImportResult = withContext(Dispatchers.IO) {
-        val info = FileManager.saveFromUri(context, uri, FileManager.DIR_VIDEOS, title, isVideo = true)
-        val dup = videoDao.findByHash(info.fileHash)
+        val original = FileManager.originalName(context, uri)
+        val source = VideoStore.sourceInfo(context, uri)
+        var ext = original.substringAfterLast('.', "").lowercase()
+        if (ext.isBlank() || ext.length > 4) ext = "mp4"
+        val niceTitle = title.ifBlank { original.substringBeforeLast('.') }
+        val fileName = niceTitle.replace(Regex("[\\\\/:*?\"<>|]"), " ").trim().take(80).ifBlank { "video" } + "." + ext
+        val turkuName = turkuDao.turkuByIdSync(turkuId)?.name
+        val saved = VideoStore.save(context, uri, fileName, turkuName)
+        val (dur, thumb) = VideoStore.meta(context, saved.path)
+        val dup = videoDao.findByHash(saved.hash)
         val clean = orderTag.trim().removePrefix("#").trim()
         val id = videoDao.insert(
             VideoItem(
                 turkuId = turkuId,
-                title = title.ifBlank { info.originalFileName.substringBeforeLast('.') },
-                localPath = info.filePath,
-                durationMs = info.durationMs,
+                title = niceTitle,
+                localPath = saved.path,
+                durationMs = dur,
                 lessonDate = lessonDate.ifBlank { Tr.today() },
                 instructor = instructor.trim(),
                 description = description.trim(),
                 tags = tags.trim(),
-                thumbnailPath = info.thumbnailPath,
-                fileSize = info.fileSize,
-                fileHash = info.fileHash,
+                thumbnailPath = thumb,
+                fileSize = saved.size,
+                fileHash = saved.hash,
                 isFavorite = favorite,
                 orderTag = clean,
                 manualOrder = clean.takeWhile { it.isDigit() }.toIntOrNull() ?: 0,
                 uploadOrder = uploadOrder
             )
         )
-        ImportResult(id, dup?.title)
+        ImportResult(id, dup?.title, source)
+    }
+
+    /** Uygulama içinde duran (eski) videoları telefonun galeri klasörüne taşır. */
+    suspend fun moveInternalVideosToGallery(onProgress: (Int, Int) -> Unit): Int = withContext(Dispatchers.IO) {
+        val list = videoDao.allSync().filter { !VideoStore.isContent(it.localPath) && FileManager.resolve(context, it.localPath) != null }
+        var n = 0
+        list.forEachIndexed { i, v ->
+            onProgress(i + 1, list.size)
+            try {
+                val newPath = VideoStore.moveToGallery(context, v.localPath, turkuDao.turkuByIdSync(v.turkuId)?.name)
+                if (newPath != null) { videoDao.update(v.copy(localPath = newPath)); n++ }
+            } catch (_: Exception) {
+            }
+        }
+        n
+    }
+
+    suspend fun internalVideoCount(): Int = withContext(Dispatchers.IO) {
+        videoDao.allSync().count { !VideoStore.isContent(it.localPath) && FileManager.resolve(context, it.localPath) != null }
     }
 
     // ---------------- Belge
@@ -167,9 +199,9 @@ class ArchiveRepository(private val context: Context) {
     /** 30 günden eski silinenleri kalıcı olarak temizler. */
     suspend fun purgeOldTrash(days: Int = 30) = withContext(Dispatchers.IO) {
         val before = System.currentTimeMillis() - days * 24L * 3600 * 1000
-        videoDao.expiredDeleted(before).forEach { deleteVideoForever(it) }
+        videoDao.expiredDeleted(before).forEach { deleteVideoForever(it, deleteGalleryFile = false) }
         docDao.expiredDeleted(before).forEach { deleteDocForever(it) }
-        turkuDao.expiredDeleted(before).forEach { deleteTurkuForever(it.id) }
+        turkuDao.expiredDeleted(before).forEach { deleteTurkuForever(it.id, deleteGalleryFiles = false) }
     }
 
     /** Küçük resmi veya süresi eksik videoları tamamlar (eski arşivden gelenler için). */
@@ -177,8 +209,8 @@ class ArchiveRepository(private val context: Context) {
         for (v in videoDao.allSync()) {
             val needThumb = v.thumbnailPath.isNullOrBlank() || FileManager.resolve(context, v.thumbnailPath) == null
             if (!needThumb && v.durationMs > 0) continue
-            val f = FileManager.resolve(context, v.localPath) ?: continue
-            val (dur, thumb) = FileManager.videoMeta(context, f.absolutePath)
+            if (!VideoStore.exists(context, v.localPath)) continue
+            val (dur, thumb) = VideoStore.meta(context, v.localPath)
             videoDao.update(
                 v.copy(
                     durationMs = if (v.durationMs > 0) v.durationMs else dur,

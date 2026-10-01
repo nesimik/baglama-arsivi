@@ -192,7 +192,9 @@ private fun StepCard(title: String, text: String) {
 fun StorageScreen(vm: MainViewModel) {
     val storage by vm.storage.collectAsStateWithLifecycle()
     val videos by vm.videos.collectAsStateWithLifecycle()
-    LaunchedEffect(Unit) { vm.refreshStorage() }
+    val internalCount by vm.internalVideos.collectAsStateWithLifecycle()
+    LaunchedEffect(Unit) { vm.refreshStorage(); vm.refreshInternalVideos() }
+    val galleryBytes = videos.filter { com.nesimi.baglamaarsivi.util.VideoStore.isContent(it.localPath) }.sumOf { it.fileSize }
     val biggest = remember(videos) { videos.sortedByDescending { it.fileSize }.take(15) }
     Column(Modifier.fillMaxSize()) {
         BackTopBar("Depolama", onBack = { vm.back() })
@@ -206,12 +208,26 @@ fun StorageScreen(vm: MainViewModel) {
                         val tot = (storage.totalBytes + storage.freeDeviceBytes).coerceAtLeast(1)
                         LinearProgressIndicator(progress = { storage.totalBytes.toFloat() / tot }, modifier = Modifier.fillMaxWidth().height(8.dp))
                         Spacer(Modifier.height(8.dp))
-                        Text("🎬 Videolar: ${Tr.size(storage.videoBytes)}")
+                        Text("🎬 Galerideki videolar (Filmler/Bağlama Arşivi): ${Tr.size(galleryBytes)}")
+                        Text("📦 Uygulama içindeki videolar: ${Tr.size(storage.videoBytes)}")
                         Text("📄 Belgeler: ${Tr.size(storage.documentBytes)}")
                         Text("🖼️ Önbellek ve küçük resimler: ${Tr.size(storage.cacheBytes)}")
                         Text("📱 Telefonda boş alan: ${Tr.size(storage.freeDeviceBytes)}")
                         Spacer(Modifier.height(8.dp))
                         OutlinedButton(onClick = { vm.clearCache() }) { Text("Önbelleği temizle") }
+                    }
+                }
+            }
+            if (internalCount > 0 && com.nesimi.baglamaarsivi.util.VideoStore.galleryEnabled) {
+                item {
+                    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
+                        Column(Modifier.padding(16.dp)) {
+                            Text("📲 $internalCount video uygulamanın içinde duruyor", fontWeight = FontWeight.Bold)
+                            Text("Bunları telefonun Filmler/Bağlama Arşivi klasörüne taşıyabilirsin. Galeride görünür, uygulama silinse bile kalır; arşivde hiçbir şey değişmez.",
+                                fontSize = 13.sp)
+                            Spacer(Modifier.height(8.dp))
+                            Button(onClick = { vm.moveVideosToGallery() }) { Text("Galeriye taşı") }
+                        }
                     }
                 }
             }
@@ -258,9 +274,9 @@ fun TrashScreen(vm: MainViewModel) {
             }
         }
     }
-    if (confirmEmpty) ConfirmDialog("Çöp kutusu boşaltılsın mı?", "Tüm silinenler ve dosyaları kalıcı olarak silinir. Geri alınamaz.", "Boşalt", { vm.emptyTrash() }, { confirmEmpty = false })
-    confirmT?.let { t -> ConfirmDialog("Kalıcı silinsin mi?", "“${t.name}” ve tüm videoları/belgeleri kalıcı olarak silinir.", "Kalıcı Sil", { vm.deleteTurkuForever(t.id) }, { confirmT = null }) }
-    confirmV?.let { v -> ConfirmDialog("Kalıcı silinsin mi?", "“${v.title}” dosyasıyla birlikte silinir.", "Kalıcı Sil", { vm.deleteVideoForever(v) }, { confirmV = null }) }
+    if (confirmEmpty) DeleteWithFileDialog("Çöp kutusu boşaltılsın mı?", "Silinenler arşivden kalıcı olarak çıkarılır.", "Boşalt", { vm.emptyTrash(it) }, { confirmEmpty = false })
+    confirmT?.let { t -> DeleteWithFileDialog("Kalıcı silinsin mi?", "“${t.name}” ve videoları arşivden kalıcı olarak çıkarılır.", "Kalıcı Sil", { vm.deleteTurkuForever(t.id, it) }, { confirmT = null }) }
+    confirmV?.let { v -> DeleteWithFileDialog("Kalıcı silinsin mi?", "“${v.title}” arşivden kalıcı olarak çıkarılır.", "Kalıcı Sil", { vm.deleteVideoForever(v, it) }, { confirmV = null }) }
     confirmD?.let { d -> ConfirmDialog("Kalıcı silinsin mi?", "“${d.title}” dosyasıyla birlikte silinir.", "Kalıcı Sil", { vm.deleteDocForever(d) }, { confirmD = null }) }
 }
 
@@ -276,4 +292,28 @@ private fun TrashRow(title: String, sub: String, onRestore: () -> Unit, onDelete
             IconButton(onClick = onDelete) { Icon(Icons.Default.Delete, "Kalıcı sil", tint = MaterialTheme.colorScheme.error) }
         }
     }
+}
+
+
+/** Kalıcı silmede "videoyu telefondan da sil" seçeneği sunar (varsayılan: telefonda kalsın). */
+@Composable
+private fun DeleteWithFileDialog(title: String, text: String, confirm: String, onConfirm: (Boolean) -> Unit, onDismiss: () -> Unit) {
+    var alsoFile by remember { mutableStateOf(false) }
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            Column {
+                Text(text)
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp)) {
+                    androidx.compose.material3.Checkbox(checked = alsoFile, onCheckedChange = { alsoFile = it })
+                    Text("Video dosyalarını telefondan (galeriden) de sil", fontSize = 14.sp)
+                }
+                Text(if (alsoFile) "⚠️ Videolar telefondan da silinecek." else "Videolar telefonun Filmler/Bağlama Arşivi klasöründe kalacak.",
+                    fontSize = 12.sp, color = if (alsoFile) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        },
+        confirmButton = { TextButton(onClick = { onConfirm(alsoFile); onDismiss() }) { Text(confirm, color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Vazgeç") } }
+    )
 }

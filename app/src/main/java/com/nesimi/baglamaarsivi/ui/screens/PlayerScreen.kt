@@ -8,6 +8,7 @@ import android.view.LayoutInflater
 import androidx.annotation.OptIn
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -141,7 +142,11 @@ fun PlayerScreen(vm: MainViewModel, startVideoId: Long) {
     var duration by remember { mutableLongStateOf(0L) }
     var speed by remember { mutableFloatStateOf(1f) }
     var mirror by remember { mutableStateOf(false) }
-    var fullscreen by remember { mutableStateOf(false) }
+    val configuration = androidx.compose.ui.platform.LocalConfiguration.current
+    val fullscreen = configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+    // Tam ekran düğmesine basınca yön kilitlenir; telefon o yöne çevrilince kilit kalkar (otomatik dönme devam eder)
+    var lockedTo by remember { mutableIntStateOf(0) } // 0 yok, 1 dikey, 2 yatay
+    var swipeDx by remember { mutableFloatStateOf(0f) }
     var controlsVisible by remember { mutableStateOf(true) }
     var interaction by remember { mutableIntStateOf(0) }
     var loopA by remember { mutableLongStateOf(-1L) }
@@ -182,10 +187,10 @@ fun PlayerScreen(vm: MainViewModel, startVideoId: Long) {
     LaunchedEffect(v?.id, v?.localPath) {
         val vv = v ?: return@LaunchedEffect
         if (loadedId == vv.id) return@LaunchedEffect
-        val f = FileManager.resolve(context, vv.localPath)
-        if (f == null) { fileMissing = true; return@LaunchedEffect }
+        val playUri = com.nesimi.baglamaarsivi.util.VideoStore.uri(context, vv.localPath)
+        if (playUri == null) { fileMissing = true; return@LaunchedEffect }
         fileMissing = false
-        player.setMediaItem(MediaItem.fromUri(android.net.Uri.fromFile(f)))
+        player.setMediaItem(MediaItem.fromUri(playUri))
         player.prepare()
         val resume = vv.lastPlaybackPositionMs
         if (resume > 3000 && (vv.durationMs == 0L || resume < vv.durationMs - 3000)) player.seekTo(resume)
@@ -239,18 +244,35 @@ fun PlayerScreen(vm: MainViewModel, startVideoId: Long) {
         }
     }
 
-    // Tam ekran
+    // Yan çevirince otomatik tam ekran: sistem çubuklarını gizle
     LaunchedEffect(fullscreen) {
         val act = activity ?: return@LaunchedEffect
         val ctrl = WindowCompat.getInsetsController(act.window, act.window.decorView)
         if (fullscreen) {
-            act.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
             ctrl.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
             ctrl.hide(WindowInsetsCompat.Type.systemBars())
         } else {
-            act.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
             ctrl.show(WindowInsetsCompat.Type.systemBars())
         }
+    }
+    LaunchedEffect(lockedTo) {
+        activity?.requestedOrientation = when (lockedTo) {
+            1 -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
+            2 -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            else -> ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        }
+    }
+    DisposableEffect(Unit) {
+        val listener = object : android.view.OrientationEventListener(context) {
+            override fun onOrientationChanged(angle: Int) {
+                if (angle < 0 || lockedTo == 0) return
+                val physPortrait = angle < 25 || angle > 335 || angle in 155..205
+                val physLandscape = angle in 65..115 || angle in 245..295
+                if ((lockedTo == 1 && physPortrait) || (lockedTo == 2 && physLandscape)) lockedTo = 0
+            }
+        }
+        if (listener.canDetectOrientation()) listener.enable()
+        onDispose { listener.disable() }
     }
 
     LaunchedEffect(mirror, playerView) { playerView?.videoSurfaceView?.scaleX = if (mirror) -1f else 1f }
@@ -280,10 +302,25 @@ fun PlayerScreen(vm: MainViewModel, startVideoId: Long) {
                         playerView = it
                     }
                 },
+                onRelease = { it.player = null },
                 modifier = Modifier.fillMaxSize()
             )
             Box(
-                Modifier.fillMaxSize().pointerInput(w) {
+                Modifier.fillMaxSize()
+                    .pointerInput(w, prev?.id, next?.id) {
+                        detectHorizontalDragGestures(
+                            onDragStart = { swipeDx = 0f },
+                            onDragCancel = { swipeDx = 0f },
+                            onDragEnd = {
+                                val threshold = w * 0.18f
+                                if (swipeDx < -threshold && next != null) switchTo(next)
+                                else if (swipeDx > threshold && prev != null) switchTo(prev)
+                                swipeDx = 0f
+                            },
+                            onHorizontalDrag = { change, dx -> change.consume(); swipeDx += dx }
+                        )
+                    }
+                    .pointerInput(w) {
                     detectTapGestures(
                         onTap = { if (controlsVisible) controlsVisible = false else poke() },
                         onDoubleTap = { off ->
@@ -293,16 +330,26 @@ fun PlayerScreen(vm: MainViewModel, startVideoId: Long) {
                     )
                 }
             )
+            if (kotlin.math.abs(swipeDx) > w * 0.06f) {
+                val goingNext = swipeDx < 0
+                val target = if (goingNext) next else prev
+                Text(
+                    if (target == null) (if (goingNext) "Son video" else "İlk video") else if (goingNext) "Sonraki ▶" else "◀ Önceki",
+                    color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp,
+                    modifier = Modifier.align(if (goingNext) Alignment.CenterEnd else Alignment.CenterStart).padding(24.dp)
+                        .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(10.dp)).padding(horizontal = 14.dp, vertical = 8.dp)
+                )
+            }
             if (fileMissing) {
                 Text("Video dosyası bulunamadı.\nYedekten geri yüklemeniz gerekebilir.", color = Color.White, modifier = Modifier.align(Alignment.Center).padding(24.dp))
             }
             if (controlsVisible) {
                 Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.35f))) {
                     Row(Modifier.fillMaxWidth().align(Alignment.TopStart).then(if (fullscreen) Modifier else Modifier.statusBarsPadding()), verticalAlignment = Alignment.CenterVertically) {
-                        IconButton(onClick = { if (fullscreen) fullscreen = false else vm.back() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Geri", tint = Color.White) }
+                        IconButton(onClick = { if (fullscreen) lockedTo = 1 else vm.back() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Geri", tint = Color.White) }
                         Text(v?.title ?: "", color = Color.White, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                         IconButton(onClick = { mirror = !mirror; poke() }) { Icon(Icons.Default.Flip, "Ayna", tint = if (mirror) FavGold else Color.White) }
-                        IconButton(onClick = { fullscreen = !fullscreen; poke() }) {
+                        IconButton(onClick = { lockedTo = if (fullscreen) 1 else 2; poke() }) {
                             Icon(if (fullscreen) Icons.Default.FullscreenExit else Icons.Default.Fullscreen, "Tam ekran", tint = Color.White)
                         }
                     }
@@ -457,7 +504,8 @@ fun PlayerScreen(vm: MainViewModel, startVideoId: Long) {
                     }
                     items(playlist, key = { "p" + it.id }) { pv ->
                         VideoCard(pv, onClick = { if (pv.id != videoId) switchTo(pv) }, isPlaying = pv.id == videoId,
-                            onOrderClick = if (pv.id == videoId) ({ orderDialog = true }) else null)
+                            modifier = Modifier.animateItem(),
+                            onOrderChange = { vm.setVideoOrderTag(pv.id, it) }, orderSuggestion = nextOrderSuggestion(playlist))
                     }
                 }
                 item { Spacer(Modifier.height(30.dp)) }

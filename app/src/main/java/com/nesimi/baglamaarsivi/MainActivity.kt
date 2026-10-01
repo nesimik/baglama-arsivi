@@ -173,6 +173,8 @@ private fun AppRoot(vm: MainViewModel) {
                 }
             }
         }
+        com.nesimi.baglamaarsivi.ui.OriginalsHandler(vm)
+        com.nesimi.baglamaarsivi.ui.screens.PracticeFinishDialog(vm)
         busy?.let { BusyOverlay(it) }
         restoreDone?.let { msg ->
             val ctx = androidx.compose.ui.platform.LocalContext.current

@@ -17,7 +17,7 @@ android {
         minSdk = 24
         targetSdk = 35
         versionCode = 200 + runNumber
-        versionName = "2.0.$runNumber"
+        versionName = "2.1.$runNumber"
     }
 
     // SABİT İMZA ANAHTARI: Bu dosya değişmediği sürece her yeni APK eskisinin üstüne kurulur, veriler korunur.

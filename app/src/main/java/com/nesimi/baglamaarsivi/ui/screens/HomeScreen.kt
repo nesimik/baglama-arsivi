@@ -75,7 +75,6 @@ fun HomeScreen(vm: MainViewModel) {
     val docs by vm.documents.collectAsStateWithLifecycle()
     val recent by vm.recentlyWatched.collectAsStateWithLifecycle()
     val stats by vm.practiceStats.collectAsStateWithLifecycle()
-    val practiceStart by vm.practiceStart.collectAsStateWithLifecycle()
     var showNew by remember { mutableStateOf(false) }
 
     val turkuNames = remember(turkus) { turkus.associate { it.turku.id to it.turku.name } }
@@ -129,8 +128,10 @@ fun HomeScreen(vm: MainViewModel) {
         }
         item {
             // Çalışma özeti
+            val t by vm.timer.collectAsStateWithLifecycle()
             var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
-            LaunchedEffect(practiceStart) { while (practiceStart > 0) { now = System.currentTimeMillis(); delay(1000) } }
+            LaunchedEffect(t.isRunning) { while (t.isRunning) { now = System.currentTimeMillis(); delay(1000) } }
+            val active = t.isActive && !t.finished
             Card(
                 shape = RoundedCornerShape(18.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
@@ -138,15 +139,18 @@ fun HomeScreen(vm: MainViewModel) {
             ) {
                 Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
-                        Text(if (practiceStart > 0) "⏱️ Çalışıyorsun: ${Tr.duration(now - practiceStart)}" else "🎯 Bugün: ${Tr.practice(stats.todaySec)}",
-                            fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                        val title = when {
+                            active && t.countdown -> "⏳ Kalan: ${Tr.duration(t.remaining(now))}"
+                            active -> "⏱️ Çalışıyorsun: ${Tr.duration(t.elapsed(now))}"
+                            else -> "🎯 Bugün: ${Tr.practice(stats.todaySec)}"
+                        }
+                        Text(title, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                         Text("Bu hafta ${Tr.practice(stats.weekSec)}  •  🔥 ${stats.streakDays} gün seri", fontSize = 12.sp,
                             color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f))
                     }
-                    if (practiceStart > 0) {
-                        Button(onClick = { vm.stopPractice() }) { Icon(Icons.Default.Stop, null); Text("Bitir") }
-                    } else {
-                        Button(onClick = { vm.switchTab(Screen.Practice) }) { Icon(Icons.Default.PlayArrow, null); Text("Çalış") }
+                    Button(onClick = { vm.switchTab(Screen.Practice) }) {
+                        Icon(if (active) Icons.Default.Stop else Icons.Default.PlayArrow, null)
+                        Text(if (active) "Sayaç" else "Çalış")
                     }
                 }
             }

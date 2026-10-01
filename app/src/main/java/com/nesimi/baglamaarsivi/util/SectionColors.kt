@@ -50,9 +50,9 @@ object SectionColors {
         } else {
             SectionStyle(
                 section = section,
-                container = lerp(Color.White, hue, 0.07f),
-                border = lerp(Color.White, hue, 0.35f),
-                badgeBg = lerp(Color.White, hue, 0.18f),
+                container = lerp(Color.White, hue, 0.11f),
+                border = lerp(Color.White, hue, 0.45f),
+                badgeBg = lerp(Color.White, hue, 0.24f),
                 badgeText = lerp(Color.Black, hue, 0.75f),
                 name = "$section. Bölüm"
             )

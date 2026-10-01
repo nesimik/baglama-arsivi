@@ -27,21 +27,21 @@ jobs:
       - name: APK adını düzenle
         run: |
           mkdir -p cikti
-          cp app/build/outputs/apk/release/app-release.apk "cikti/BaglamaArsivi-v2.0.${{ github.run_number }}.apk"
+          cp app/build/outputs/apk/release/app-release.apk "cikti/BaglamaArsivi-v2.1.${{ github.run_number }}.apk"
           cp app/build/outputs/apk/release/app-release.apk "cikti/BaglamaArsivi.apk"
 
       - name: APK'yı yükle
         uses: actions/upload-artifact@v4
         with:
-          name: BaglamaArsivi-v2.0.${{ github.run_number }}
+          name: BaglamaArsivi-v2.1.${{ github.run_number }}
           path: cikti/BaglamaArsivi-v*.apk
           if-no-files-found: error
 
       - name: Sürüm sayfasına koy (telefondan kolay indirme)
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v2.0.${{ github.run_number }}
-          name: Bağlama Arşivi v2.0.${{ github.run_number }}
+          tag_name: v2.1.${{ github.run_number }}
+          name: Bağlama Arşivi v2.1.${{ github.run_number }}
           files: cikti/*.apk
           make_latest: true
         env:
