@@ -4,6 +4,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -223,6 +224,7 @@ fun TurkuCard(item: TurkuWithDetails, compact: Boolean, onClick: () -> Unit, onF
     }
 }
 
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 /** Video kartı – zeminler açık renkli, bölüm rengi yalnızca hafif bir tonda. */
 @Composable
 fun VideoCard(
@@ -236,7 +238,9 @@ fun VideoCard(
     onEdit: (() -> Unit)? = null,
     onDelete: (() -> Unit)? = null,
     onOrderChange: ((String) -> Unit)? = null,
-    orderSuggestion: String = ""
+    orderSuggestion: String = "",
+    selected: Boolean? = null,
+    onLongClick: (() -> Unit)? = null
 ) {
     val dark = LocalIsDark.current
     val style = SectionColors.forTag(video.displayOrderTag, dark)
@@ -247,19 +251,24 @@ fun VideoCard(
     }
     val progress = if (video.durationMs > 0) (video.lastPlaybackPositionMs.toFloat() / video.durationMs).coerceIn(0f, 1f) else 0f
     Card(
-        onClick = onClick,
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).combinedClickable(onClick = onClick, onLongClick = onLongClick),
         shape = RoundedCornerShape(14.dp),
         colors = CardDefaults.cardColors(containerColor = style.container),
-        border = BorderStroke(if (isPlaying) 2.dp else 1.dp, if (isPlaying) MaterialTheme.colorScheme.primary else style.border)
+        border = BorderStroke(
+            if (isPlaying || selected == true) 2.dp else 1.dp,
+            if (isPlaying || selected == true) MaterialTheme.colorScheme.primary else style.border
+        )
     ) {
         Row(Modifier.padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (selected != null) {
+                androidx.compose.material3.Checkbox(checked = selected, onCheckedChange = { onClick() })
+            }
             Thumbnail(video.thumbnailPath, Modifier.width(112.dp).height(64.dp), video.durationMs, progress)
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     val tag = video.displayOrderTag
-                    if (onOrderChange != null) {
+                    if (onOrderChange != null && selected == null) {
                         OrderTagField(tag, orderSuggestion, style.badgeBg, style.badgeText, onOrderChange)
                     } else Surface(
                         shape = RoundedCornerShape(6.dp),
@@ -287,7 +296,7 @@ fun VideoCard(
                     Icon(if (video.isFavorite) Icons.Default.Star else Icons.Outlined.StarBorder, "Favori", tint = if (video.isFavorite) FavGold else MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
-            if (onEdit != null || onDelete != null || onOrderClick != null) {
+            if (selected == null && (onEdit != null || onDelete != null || onOrderClick != null)) {
                 var menu by remember { mutableStateOf(false) }
                 var confirmDelete by remember { mutableStateOf(false) }
                 Box {

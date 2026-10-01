@@ -270,6 +270,22 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun restoreTurku(id: Long) = viewModelScope.launch { repo.restoreTurku(id); toast("Geri yüklendi") }
     fun restoreVideo(id: Long) = viewModelScope.launch { repo.restoreVideo(id); toast("Geri yüklendi") }
     fun restoreDoc(id: Long) = viewModelScope.launch { repo.restoreDoc(id); toast("Geri yüklendi") }
+    /** Toplu silme: arşivden ve telefondan. İzin gerekenler için telefon tek bir onay sorar. */
+    fun deleteVideos(ids: List<Long>) = viewModelScope.launch {
+        val failed = mutableListOf<String>()
+        var n = 0
+        _busy.value = BusyState("${ids.size} video siliniyor…")
+        for (id in ids) {
+            val v = repo.videoSync(id) ?: continue
+            if (!repo.deleteVideoForever(v, true)) failed += v.localPath
+            n++
+        }
+        _busy.value = null
+        refreshStorage()
+        toast("$n video silindi")
+        if (failed.isNotEmpty()) requestSystemDelete(failed, askFirst = false, reason = "")
+    }
+
     fun deleteTurkuForever(id: Long) = viewModelScope.launch {
         val failed = repo.deleteTurkuForever(id, true); refreshStorage()
         toast("Türkü ve videoları silindi")
@@ -385,7 +401,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private var dupChecked = false
     /**
      * Uygulama öne gelince: telefondan silinen videoları arşivden de kaldırır ve
-     * (oturumda bir kez) galeride ikinci kopyası duran videoları bulup silmeyi teklif eder.
+     * (oturumda bir kez) eski sürümlerin yaptığı fazladan kopyaları temizler.
      */
     fun syncFolder(force: Boolean = false) {
         val now = System.currentTimeMillis()
@@ -397,11 +413,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             com.nesimi.baglamaarsivi.util.VideoStore.checkTick.value++
             if (!dupChecked || force) {
                 dupChecked = true
-                val declined = prefs.getStringSet("kopya_sorma", emptySet())!!
-                val dups = runCatching { repo.findDuplicateCopies() }.getOrDefault(emptyList()).filter { force || it.toString() !in declined }
-                if (dups.isNotEmpty()) requestSystemDeleteUris(dups, askFirst = true,
-                    reason = "${dups.size} videonun galeride ikinci bir kopyası var (genelde WhatsApp klasöründe). Arşivdeki kopya Bağlama Arşivi klasöründe duruyor.")
-                else if (force) toast("Çift kopya bulunamadı ✅")
+                val c = runCatching { repo.removeOwnCopies() }.getOrDefault(0)
+                if (c > 0) { toast("🧹 $c videonun fazladan kopyası silindi; videolar artık asıl yerinden oynatılıyor"); refreshStorage(); refreshInternalVideos() }
+                else if (force) toast("Fazladan kopya yok ✅")
+                com.nesimi.baglamaarsivi.util.VideoStore.checkTick.value++
             }
         }
     }
@@ -447,6 +462,44 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 _lastBackup.value = now
                 toast("Yedek hazır ✅ ($n dosya + veritabanı)")
             } catch (e: Exception) {
+                toast("Yedek alınamadı: ${e.message}")
+            } finally {
+                _busy.value = null
+            }
+        }
+    }
+
+    /** Yedeği telefonun İndirilenler/Bağlama Arşivim klasörüne kaydeder (Android 10+). */
+    fun backupToPhoneFolder() {
+        if (android.os.Build.VERSION.SDK_INT < 29) return
+        val name = "BaglamaArsivi_yedek_" + java.text.SimpleDateFormat("yyyy-MM-dd_HHmm", Tr.LOCALE).format(java.util.Date()) + ".zip"
+        val values = android.content.ContentValues().apply {
+            put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, name)
+            put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "application/zip")
+            put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, android.os.Environment.DIRECTORY_DOWNLOADS + "/Bağlama Arşivim")
+            put(android.provider.MediaStore.MediaColumns.IS_PENDING, 1)
+        }
+        val resolver = ctx.contentResolver
+        val uri = try {
+            resolver.insert(android.provider.MediaStore.Downloads.getContentUri(android.provider.MediaStore.VOLUME_EXTERNAL_PRIMARY), values)
+        } catch (e: Exception) { null }
+        if (uri == null) { toast("Yedek dosyası oluşturulamadı"); return }
+        viewModelScope.launch {
+            _busy.value = BusyState("Yedek alınıyor… Uygulamayı kapatmayın.")
+            try {
+                val n = withContext(Dispatchers.IO) {
+                    BackupManager.export(getApplication(), uri) { p -> _busy.value = BusyState("Yedek alınıyor… Uygulamayı kapatmayın.", p) }
+                }
+                withContext(Dispatchers.IO) {
+                    val done = android.content.ContentValues().apply { put(android.provider.MediaStore.MediaColumns.IS_PENDING, 0) }
+                    resolver.update(uri, done, null, null)
+                }
+                val now = System.currentTimeMillis()
+                prefs.edit().putLong("son_yedek", now).apply()
+                _lastBackup.value = now
+                toast("Yedek hazır ✅ İndirilenler/Bağlama Arşivim/$name ($n dosya)")
+            } catch (e: Exception) {
+                try { resolver.delete(uri, null, null) } catch (_: Exception) {}
                 toast("Yedek alınamadı: ${e.message}")
             } finally {
                 _busy.value = null

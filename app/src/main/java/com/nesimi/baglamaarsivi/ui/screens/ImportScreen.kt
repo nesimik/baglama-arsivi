@@ -225,22 +225,10 @@ fun ImportScreen(vm: MainViewModel, screen: Screen.Import) {
                     Text("⭐ Favorilere ekle", modifier = Modifier.weight(1f))
                     Switch(checked = fav, onCheckedChange = { fav = it })
                 }
-                if (isVideo && android.os.Build.VERSION.SDK_INT >= 30 && !allFiles) {
-                    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer), modifier = Modifier.padding(top = 6.dp)) {
-                        Column(Modifier.padding(12.dp)) {
-                            Text("📁 Tek kopya için izin ver", fontWeight = FontWeight.Bold)
-                            Text("“Tüm dosyalara erişim” izni verirsen video WhatsApp klasöründen Bağlama Arşivi klasörüne TAŞINIR: galeride tek görünür, ikinci kopya oluşmaz. İzin vermezsen video WhatsApp'taki yerinde kalır ve oradan oynatılır (yine kopya oluşmaz).",
-                                fontSize = 12.sp)
-                            TextButton(onClick = {
-                                try {
-                                    context.startActivity(android.content.Intent(android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, android.net.Uri.parse("package:" + context.packageName)))
-                                } catch (_: Exception) {
-                                    context.startActivity(android.content.Intent(android.provider.Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
-                                }
-                            }) { Text("İzni ver (Ayarlar açılır)") }
-                        }
-                    }
-                }
+                if (isVideo) Text(
+                    "Videolar kopyalanmaz: telefondaki asıl yerinden (ör. WhatsApp klasörü) oynatılır, galeride tek görünür.",
+                    fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp)
+                )
                 Spacer(Modifier.height(8.dp))
                 Button(
                     enabled = canSave,

@@ -21,6 +21,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FormatListNumbered
@@ -104,6 +106,10 @@ fun TurkuDetailScreen(vm: MainViewModel, turkuId: Long) {
     var editVideo by remember { mutableStateOf<VideoItem?>(null) }
     var editDoc by remember { mutableStateOf<DocumentItem?>(null) }
     var confirmRenumber by remember { mutableStateOf(false) }
+    val selectedIds = remember { androidx.compose.runtime.mutableStateListOf<Long>() }
+    var selectionMode by remember { mutableStateOf(false) }
+    var confirmBulkDelete by remember { mutableStateOf(false) }
+    androidx.activity.compose.BackHandler(enabled = selectionMode) { selectionMode = false; selectedIds.clear() }
 
     val t = turku
     if (t == null) {
@@ -113,7 +119,17 @@ fun TurkuDetailScreen(vm: MainViewModel, turkuId: Long) {
     val status = StudyStatus.fromString(t.status)
 
     Column(Modifier.fillMaxSize()) {
-        BackTopBar(t.name, onBack = { vm.back() }) {
+        if (selectionMode) {
+            SelectionBar(
+                count = selectedIds.size,
+                onClose = { selectionMode = false; selectedIds.clear() },
+                onSelectAll = {
+                    if (selectedIds.size == videos.size) selectedIds.clear()
+                    else { selectedIds.clear(); selectedIds.addAll(videos.map { it.id }) }
+                },
+                onDelete = { if (selectedIds.isNotEmpty()) confirmBulkDelete = true }
+            )
+        } else BackTopBar(t.name, onBack = { vm.back() }) {
             IconButton(onClick = { vm.toggleTurkuFavorite(t) }) {
                 Icon(if (t.isFavorite) Icons.Default.Star else Icons.Outlined.StarBorder, "Favori", tint = if (t.isFavorite) FavGold else MaterialTheme.colorScheme.onSurface)
             }
@@ -190,7 +206,7 @@ fun TurkuDetailScreen(vm: MainViewModel, turkuId: Long) {
                     } else {
                         item {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text("💡 Kartın solundaki kutuya numara yaz (1.1, 1.2, 2.1…). Video kendi yerine kayar; aynı bölümdekiler aynı renkte.", fontSize = 12.sp,
+                                Text("💡 Kutuya numara yaz (1.1, 1.2, 2.1…), video yerine kayar. Toplu silmek için karta basılı tut.", fontSize = 12.sp,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
                                 IconButton(onClick = { confirmRenumber = true }) { Icon(Icons.Default.FormatListNumbered, "Yeniden numaralandır") }
                             }
@@ -202,7 +218,16 @@ fun TurkuDetailScreen(vm: MainViewModel, turkuId: Long) {
                         item(key = "h$section") { GroupHeader(section, list.size, Modifier.animateItem()) }
                         items(list, key = { it.id }) { v ->
                             VideoCard(
-                                v, onClick = { vm.navigate(Screen.Player(v.id)) },
+                                v,
+                                onClick = {
+                                    if (selectionMode) { if (v.id in selectedIds) selectedIds.remove(v.id) else selectedIds.add(v.id) }
+                                    else vm.navigate(Screen.Player(v.id))
+                                },
+                                selected = if (selectionMode) v.id in selectedIds else null,
+                                onLongClick = {
+                                    if (!selectionMode) { selectionMode = true; selectedIds.clear() }
+                                    if (v.id !in selectedIds) selectedIds.add(v.id)
+                                },
                                 modifier = Modifier.animateItem(),
                                 onOrderClick = { orderFor = v }, onFavorite = { vm.toggleVideoFavorite(v) },
                                 onEdit = { editVideo = v }, onDelete = { vm.deleteVideo(v.id) },
@@ -251,6 +276,13 @@ fun TurkuDetailScreen(vm: MainViewModel, turkuId: Long) {
     orderFor?.let { v -> OrderTagDialog(v.orderTag.ifBlank { v.displayOrderTag }, v.title, onSave = { vm.setVideoOrderTag(v.id, it) }, onDismiss = { orderFor = null }) }
     editVideo?.let { v -> VideoEditDialog(vm, v, onDismiss = { editVideo = null }) }
     editDoc?.let { d -> DocEditDialog(vm, d, onDismiss = { editDoc = null }) }
+    if (confirmBulkDelete) ConfirmDialog(
+        "${selectedIds.size} video silinsin mi?",
+        "Seçilen videolar arşivden ve telefondan silinecek. Geri alınamaz.",
+        "Sil",
+        onConfirm = { vm.deleteVideos(selectedIds.toList()); selectedIds.clear(); selectionMode = false },
+        onDismiss = { confirmBulkDelete = false }
+    )
     if (confirmRenumber) ConfirmDialog(
         "Yeniden numaralandır", "Videolar şu anki sırasıyla 1, 2, 3… diye numaralanacak. Noktalı numaralar (2.1 gibi) silinir.", "Numaralandır",
         onConfirm = { vm.renumberVideos(videos) }, onDismiss = { confirmRenumber = false }, destructive = false
@@ -348,4 +380,19 @@ fun GroupHeader(section: Int?, count: Int, modifier: Modifier = Modifier) {
         Text("  •  $count video", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         if (section == null) Text("  (numara ver, yerine geçsin)", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
+}
+
+
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+fun SelectionBar(count: Int, onClose: () -> Unit, onSelectAll: () -> Unit, onDelete: () -> Unit) {
+    androidx.compose.material3.TopAppBar(
+        title = { Text("$count seçildi", fontWeight = FontWeight.Bold) },
+        navigationIcon = { IconButton(onClick = onClose) { Icon(Icons.Default.Close, "Seçimi kapat") } },
+        actions = {
+            IconButton(onClick = onSelectAll) { Icon(Icons.Default.SelectAll, "Tümünü seç") }
+            IconButton(onClick = onDelete, enabled = count > 0) { Icon(Icons.Default.Delete, "Seçilenleri sil", tint = MaterialTheme.colorScheme.error) }
+        },
+        colors = androidx.compose.material3.TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+    )
 }

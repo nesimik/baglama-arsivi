@@ -112,12 +112,19 @@ fun SettingsScreen(vm: MainViewModel) {
                 val days = if (last > 0) ((System.currentTimeMillis() - last) / 86_400_000L).toInt() else -1
                 Text(if (last > 0) "Son yedek: ${Tr.dateTime(last)}" else "Henüz yedek alınmadı", fontWeight = FontWeight.Bold)
                 if (days < 0 || days >= 7) Text("⚠️ Videoların yalnızca bu telefonda. Düzenli yedek almanı öneririm.", fontSize = 12.sp, color = Color(0xFFC2410C))
-                Text("Tam yedek: tüm türküler, videolar, notalar, işaretler ve çalışma kayıtları tek bir .zip dosyasına kaydedilir. " +
-                    "Dosyayı Google Drive'a, bilgisayara veya SD karta koyabilirsin.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                Text("Tam yedek: uygulamada görünen tüm videolar, notalar, türküler, numaralar, işaretler ve çalışma kayıtları tek bir .zip dosyasına toplanır. " +
+                    "Videoların ikinci kopyası yalnızca bu yedek dosyasında olur.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(vertical = 6.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = doBackup, modifier = Modifier.weight(1f)) { Icon(Icons.Default.Backup, null); Spacer(Modifier.width(4.dp)); Text("Yedek Al") }
+                    Button(onClick = { if (com.nesimi.baglamaarsivi.util.VideoStore.galleryEnabled) vm.backupToPhoneFolder() else doBackup() }, modifier = Modifier.weight(1f)) {
+                        Icon(Icons.Default.Backup, null); Spacer(Modifier.width(4.dp)); Text("Yedek Al")
+                    }
                     FilledTonalButton(onClick = doRestore, modifier = Modifier.weight(1f)) { Icon(Icons.Default.Restore, null); Spacer(Modifier.width(4.dp)); Text("Geri Yükle") }
+                }
+                if (com.nesimi.baglamaarsivi.util.VideoStore.galleryEnabled) {
+                    Text("Yedek, telefonun Dosyalar uygulamasında İndirilenler (Download) → Bağlama Arşivim klasörüne kaydedilir.",
+                        fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    TextButton(onClick = doBackup) { Text("Başka bir yere kaydet (Drive, SD kart…)") }
                 }
                 TextButton(onClick = { vm.navigate(Screen.Migration) }) {
                     Icon(Icons.Default.CloudDownload, null); Spacer(Modifier.width(4.dp)); Text("Eski “Bağlama Arşivim” uygulamasından aktar")
@@ -216,25 +223,12 @@ fun StorageScreen(vm: MainViewModel) {
                         Spacer(Modifier.height(8.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             OutlinedButton(onClick = { vm.clearCache() }) { Text("Önbelleği temizle") }
-                            if (com.nesimi.baglamaarsivi.util.VideoStore.galleryEnabled) OutlinedButton(onClick = { vm.syncFolder(force = true) }) { Text("Çift kopyaları bul") }
+                            if (com.nesimi.baglamaarsivi.util.VideoStore.galleryEnabled) OutlinedButton(onClick = { vm.syncFolder(force = true) }) { Text("Fazladan kopyaları temizle") }
                         }
                         if (com.nesimi.baglamaarsivi.util.VideoStore.galleryEnabled) Text(
-                            "Videolar telefonda Movies/Bağlama Arşivi/<türkü adı> klasöründe. Uygulamadan silinen video oradan da silinir; oradan silinen video uygulamadan da kalkar.",
+                            "Uygulama videoları kopyalamaz, telefondaki asıl yerinden (ör. WhatsApp klasörü) oynatır. Uygulamadan silinen video telefondan da silinir; telefondan silinen video uygulamadan da kalkar. Yedek Al ile hepsi tek .zip dosyasına toplanır.",
                             fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp)
                         )
-                    }
-                }
-            }
-            if (internalCount > 0 && com.nesimi.baglamaarsivi.util.VideoStore.galleryEnabled) {
-                item {
-                    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
-                        Column(Modifier.padding(16.dp)) {
-                            Text("📲 $internalCount video uygulamanın içinde duruyor", fontWeight = FontWeight.Bold)
-                            Text("Bunları telefonun Filmler/Bağlama Arşivi klasörüne taşıyabilirsin. Galeride görünür, uygulama silinse bile kalır; arşivde hiçbir şey değişmez.",
-                                fontSize = 13.sp)
-                            Spacer(Modifier.height(8.dp))
-                            Button(onClick = { vm.moveVideosToGallery() }) { Text("Galeriye taşı") }
-                        }
                     }
                 }
             }

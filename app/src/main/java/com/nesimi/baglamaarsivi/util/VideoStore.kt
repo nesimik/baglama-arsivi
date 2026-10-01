@@ -189,6 +189,29 @@ object VideoStore {
         return input.use { save(context, it, fileName, turkuName) }
     }
 
+    /** Son çare: galeride GÖRÜNMEYEN, uygulamaya özel gizli kopya. */
+    fun savePrivate(context: Context, source: Uri, fileName: String): Saved {
+        val input = context.contentResolver.openInputStream(source) ?: throw IllegalStateException("Video açılamadı")
+        val digest = MessageDigest.getInstance("SHA-256")
+        val dir = File(context.filesDir, FileManager.DIR_VIDEOS).apply { mkdirs() }
+        val dest = uniqueFile(dir, fileName)
+        var total = 0L
+        val buf = ByteArray(128 * 1024)
+        try {
+            input.use { inp ->
+                FileOutputStream(dest).use { out ->
+                    while (true) {
+                        val r = inp.read(buf); if (r == -1) break
+                        out.write(buf, 0, r); digest.update(buf, 0, r); total += r
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            dest.delete(); throw e
+        }
+        return Saved(dest.absolutePath, total, hex(digest.digest()))
+    }
+
     fun save(context: Context, input: InputStream, fileName: String, turkuName: String?): Saved {
         val digest = MessageDigest.getInstance("SHA-256")
         var total = 0L
@@ -273,6 +296,64 @@ object VideoStore {
      * Paylaşılan/seçilen orijinal videonun (ör. WhatsApp klasöründeki) galeri kaydını bulur.
      * Okuma izni gerekir. Kendi kaydettiğimiz kopyalar hariç tutulur.
      */
+    /**
+     * Seçilen/paylaşılan videonun telefondaki ASIL dosyasını (galeri kaydını) bulur. Bulunursa uygulama
+     * kopya yapmadan doğrudan onu kullanır. Sıra:
+     *  1) Zaten galeri adresi (content://media/...)
+     *  2) Galeri seçicisi adresi (content://media/picker/.../ID)
+     *  3) Dosya seçici adresi (com.android.providers.media.documents -> video:ID)
+     *  4) Dosya seçici yol adresi (com.android.externalstorage.documents -> primary:yol)
+     *  5) WhatsApp vb. paylaşım: ad + boyut, olmazsa yalnızca boyut ile galeride ara
+     */
+    fun resolveOriginal(context: Context, source: Uri): Uri? {
+        if (!galleryEnabled) return null
+        val collection = MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL)
+        fun byId(id: Long?): Uri? {
+            if (id == null) return null
+            val u = android.content.ContentUris.withAppendedId(collection, id)
+            return u.takeIf { exists(context, it.toString()) }
+        }
+        try {
+            val auth = source.authority ?: ""
+            val segs = source.pathSegments
+            if (auth == MediaStore.AUTHORITY) {
+                if (segs.contains("picker") || segs.contains("picker_get_content")) byId(segs.lastOrNull()?.toLongOrNull())?.let { return it }
+                else if (exists(context, source.toString())) return byId(source.lastPathSegment?.toLongOrNull()) ?: source
+            }
+            if (android.provider.DocumentsContract.isDocumentUri(context, source)) {
+                val docId = android.provider.DocumentsContract.getDocumentId(source)
+                if (auth == "com.android.providers.media.documents" && docId.startsWith("video:")) {
+                    byId(docId.substringAfter(':').toLongOrNull())?.let { return it }
+                }
+                if (auth == "com.android.externalstorage.documents" && docId.startsWith("primary:")) {
+                    val full = android.os.Environment.getExternalStorageDirectory().absolutePath + "/" + docId.substringAfter(':')
+                    byDataPath(context, full)?.let { return it }
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "adres çözülemedi", e)
+        }
+        val info = sourceInfo(context, source) ?: return null
+        findOriginal(context, info.first, info.second)?.let { return it }
+        // Ad farklı olabilir (WhatsApp paylaşırken adı değiştirir): boyutla ara
+        val bySize = findOutsideArchiveBySize(context, info.second)
+        return bySize.firstOrNull()
+    }
+
+    @Suppress("DEPRECATION")
+    private fun byDataPath(context: Context, path: String): Uri? = try {
+        val collection = MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL)
+        context.contentResolver.query(collection, arrayOf(MediaStore.Video.Media._ID), "${MediaStore.MediaColumns.DATA} = ?", arrayOf(path), null)?.use { c ->
+            if (c.moveToFirst()) android.content.ContentUris.withAppendedId(collection, c.getLong(0)) else null
+        }
+    } catch (_: Exception) {
+        null
+    }
+
+    /** Uygulamanın kendi kopyası mı? (eski sürümlerde Bağlama Arşivi klasörüne veya uygulama içine kopyalananlar) */
+    fun isOwnCopy(context: Context, path: String?): Boolean =
+        !path.isNullOrBlank() && (!isContent(path) && !path.startsWith("/storage/") || isInArchiveFolder(context, path))
+
     fun findOriginal(context: Context, displayName: String, size: Long): Uri? {
         if (!galleryEnabled) return null
         return try {

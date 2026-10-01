@@ -51,7 +51,7 @@ object BackupManager {
         data class GalleryVideo(val id: Long, val path: String, val size: Long, val entry: String)
         val gallery = mutableListOf<GalleryVideo>()
         try {
-            db.openHelper.readableDatabase.query("SELECT id, localPath, fileSize FROM videolar WHERE localPath LIKE 'content://%'").use { c ->
+            db.openHelper.readableDatabase.query("SELECT id, localPath, fileSize FROM videolar WHERE localPath LIKE 'content://%' AND isDeleted = 0").use { c ->
                 while (c.moveToNext()) {
                     val id = c.getLong(0)
                     val path = c.getString(1)

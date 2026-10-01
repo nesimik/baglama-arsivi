@@ -113,24 +113,17 @@ class ArchiveRepository(private val context: Context) {
         if (ext.isBlank() || ext.length > 4) ext = "mp4"
         val niceTitle = title.ifBlank { original.substringBeforeLast('.') }
         val fileName = niceTitle.replace(Regex("[\\\\/:*?\"<>|]"), " ").trim().take(80).ifBlank { "video" } + "." + ext
-        val turkuName = turkuDao.turkuByIdSync(turkuId)?.name
-        // Zaten Bağlama Arşivi klasöründe duruyorsa yeniden kopyalama, yerindekine bağla
-        val existing = VideoStore.findInArchiveFolder(context, uri)
-        // Orijinal dosya (ör. WhatsApp klasöründe) galeride bulunabiliyorsa:
-        //  - "Tüm dosyalara erişim" varsa Bağlama Arşivi klasörüne TAŞI (tek kopya)
-        //  - yoksa kopyalama, orijinaline bağlan (yine tek kopya)
-        val originalUri = if (existing == null && source != null) VideoStore.findOriginal(context, source.first, source.second) else null
-        val moved = if (originalUri != null) VideoStore.moveIntoArchive(context, originalUri, fileName, turkuName) else null
-        val saved = when {
-            existing != null -> {
-                VideoStore.mediaId(existing.toString())?.let { VideoStore.unignore(context, it) }
-                VideoStore.Saved(existing.toString(), source?.second ?: 0L, "")
-            }
-            moved != null -> moved
-            originalUri != null -> VideoStore.Saved(originalUri.toString(), source?.second ?: 0L, "")
-            else -> VideoStore.save(context, uri, fileName, turkuName)
+        // KOPYA YOK: videonun telefondaki asıl dosyası bulunur ve uygulama doğrudan onu kullanır.
+        // Asıl dosya bulunamazsa (çok nadir) galeride görünmeyen gizli bir kopya alınır.
+        val originalUri = VideoStore.resolveOriginal(context, uri)
+        val saved = if (originalUri != null) {
+            VideoStore.mediaId(originalUri.toString())?.let { VideoStore.unignore(context, it) }
+            val size = source?.second ?: VideoStore.sourceInfo(context, originalUri)?.second ?: 0L
+            VideoStore.Saved(originalUri.toString(), size, "")
+        } else {
+            VideoStore.savePrivate(context, uri, fileName)
         }
-        val linked = saved.hash.isEmpty()
+        val linked = originalUri != null
         val (dur, thumb) = VideoStore.meta(context, saved.path)
         val dup = if (linked) videoDao.allSync().firstOrNull { !it.isDeleted && VideoStore.mediaId(it.localPath) == VideoStore.mediaId(saved.path) }
             else videoDao.findByHash(saved.hash)
@@ -171,17 +164,24 @@ class ArchiveRepository(private val context: Context) {
         missing.size
     }
 
-    /** Bağlama Arşivi klasöründeki videolarının, galeride (WhatsApp vb.) kalan ikinci kopyaları. */
-    suspend fun findDuplicateCopies(): List<Uri> = withContext(Dispatchers.IO) {
-        if (!VideoStore.galleryEnabled || !VideoStore.hasReadPermission(context)) return@withContext emptyList()
-        val out = mutableListOf<Uri>()
+    /**
+     * Eski sürümlerin yaptığı kopyaları temizler: asıl dosya (ör. WhatsApp'taki) telefonda duruyorsa
+     * kayıt asıl dosyaya bağlanır ve uygulamanın kopyası silinir. Asıl dosya yoksa kopya korunur.
+     */
+    suspend fun removeOwnCopies(): Int = withContext(Dispatchers.IO) {
+        if (!VideoStore.galleryEnabled || !VideoStore.hasReadPermission(context)) return@withContext 0
+        var n = 0
         for (v in videoDao.allSync()) {
-            if (!VideoStore.isInArchiveFolder(context, v.localPath)) continue
+            if (!VideoStore.isOwnCopy(context, v.localPath)) continue
+            if (!VideoStore.exists(context, v.localPath)) continue
             val size = if (v.fileSize > 0) v.fileSize else continue
-            // Uygulama dosya adını değiştirdiği için bayt boyutuyla eşleştir (aynı boyutta iki farklı video pratikte olmaz)
-            out += VideoStore.findOutsideArchiveBySize(context, size)
+            val own = VideoStore.mediaId(v.localPath)
+            val original = VideoStore.findOutsideArchiveBySize(context, size).firstOrNull { VideoStore.mediaId(it.toString()) != own } ?: continue
+            videoDao.update(v.copy(localPath = original.toString()))
+            if (VideoStore.isContent(v.localPath)) VideoStore.delete(context, v.localPath) else FileManager.delete(v.localPath)
+            n++
         }
-        out.distinct()
+        n
     }
 
     /** Dosyası silinmiş bir videoyu yeni seçilen dosyaya bağlar (klasördeyse kopyalamaz). */
@@ -196,7 +196,9 @@ class ArchiveRepository(private val context: Context) {
             var ext = FileManager.originalName(context, uri).substringAfterLast('.', "mp4").lowercase()
             if (ext.length > 4) ext = "mp4"
             val name = v.title.replace(Regex("[\\\\/:*?\"<>|]"), " ").trim().take(80).ifBlank { "video" } + "." + ext
-            val saved = VideoStore.save(context, uri, name, turkuDao.turkuByIdSync(v.turkuId)?.name)
+            val orig = VideoStore.resolveOriginal(context, uri)
+            val saved = if (orig != null) VideoStore.Saved(orig.toString(), VideoStore.sourceInfo(context, orig)?.second ?: 0L, "")
+                else VideoStore.savePrivate(context, uri, name)
             path = saved.path
             size = saved.size
         }
