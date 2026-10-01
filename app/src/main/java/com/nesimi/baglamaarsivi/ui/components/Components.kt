@@ -49,6 +49,10 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.produceState
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -236,6 +240,11 @@ fun VideoCard(
 ) {
     val dark = LocalIsDark.current
     val style = SectionColors.forTag(video.displayOrderTag, dark)
+    val ctx = LocalContext.current
+    val tick by com.nesimi.baglamaarsivi.util.VideoStore.checkTick.collectAsState()
+    val missing by produceState(false, video.localPath, tick) {
+        value = withContext(Dispatchers.IO) { !com.nesimi.baglamaarsivi.util.VideoStore.exists(ctx, video.localPath) }
+    }
     val progress = if (video.durationMs > 0) (video.lastPlaybackPositionMs.toFloat() / video.durationMs).coerceIn(0f, 1f) else 0f
     Card(
         onClick = onClick,
@@ -269,6 +278,7 @@ fun VideoCard(
                 }
                 Spacer(Modifier.height(3.dp))
                 Text(video.title, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurface)
+                if (missing) Text("⚠️ Dosya telefondan silinmiş – dokun", fontSize = 11.sp, color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.SemiBold)
                 val info = subtitle ?: listOf(video.lessonDate.takeIf { it.isNotBlank() }?.let { "📅 $it" }, video.instructor.takeIf { it.isNotBlank() }?.let { "👤 $it" }).filterNotNull().joinToString("  ")
                 if (info.isNotBlank()) Text(info, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }

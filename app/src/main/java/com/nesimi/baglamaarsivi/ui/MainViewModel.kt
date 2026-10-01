@@ -358,6 +358,43 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    // ---------------------------------------------------------------- Klasör eşitleme
+    private var lastSync = 0L
+    /** Movies/Bağlama Arşivi klasöründeki yeni videoları arşive ekler (uygulama her öne geldiğinde). */
+    fun syncFolder(force: Boolean = false) {
+        val now = System.currentTimeMillis()
+        if (!force && now - lastSync < 5000) return
+        lastSync = now
+        viewModelScope.launch {
+            val n = runCatching { repo.syncArchiveFolder() }.getOrDefault(0)
+            if (n > 0) { toast("📂 Klasörden $n yeni video arşive eklendi"); refreshStorage() }
+            else if (force) toast("Klasörde yeni video yok")
+            com.nesimi.baglamaarsivi.util.VideoStore.checkTick.value++
+        }
+    }
+
+
+    fun relinkVideo(v: VideoItem, uri: Uri) {
+        viewModelScope.launch {
+            _busy.value = BusyState("Video bağlanıyor…")
+            try {
+                repo.relinkVideo(v, uri)
+                toast("Video yeniden bağlandı ✅")
+            } catch (e: Exception) {
+                toast("Bağlanamadı: ${e.message}")
+            } finally {
+                _busy.value = null
+                com.nesimi.baglamaarsivi.util.VideoStore.checkTick.value++
+            }
+        }
+    }
+
+    /** Dosyası silinmiş videoyu arşivden tamamen çıkarır. */
+    fun removeMissingVideo(v: VideoItem) = viewModelScope.launch {
+        repo.deleteVideoForever(v, deleteGalleryFile = false)
+        toast("“${v.title}” arşivden kaldırıldı")
+    }
+
     suspend fun createTurkuQuick(name: String, region: String): Long =
         repo.insertTurku(Turku(name = name.trim(), region = region.trim(), manualOrder = turkus.value.size))
 

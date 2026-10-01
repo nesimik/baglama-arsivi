@@ -30,6 +30,9 @@ object VideoStore {
 
     val galleryEnabled: Boolean get() = Build.VERSION.SDK_INT >= 29
 
+    /** Arttıkça kartlar "dosya hâlâ duruyor mu" kontrolünü yeniler (uygulama öne gelince vb.) */
+    val checkTick = kotlinx.coroutines.flow.MutableStateFlow(0)
+
     fun isContent(path: String?) = path != null && path.startsWith("content://")
 
     /** Oynatma / okuma için Uri; dosya yoksa null. */
@@ -215,6 +218,86 @@ object VideoStore {
         }
     } catch (_: Exception) {
         null
+    }
+
+    /** content://media/.../video/media/123 -> 123 (farklı "volume" adlarına rağmen karşılaştırma için) */
+    fun mediaId(path: String?): Long? {
+        if (!isContent(path)) return null
+        val u = Uri.parse(path)
+        if (u.authority != MediaStore.AUTHORITY) return null
+        return u.lastPathSegment?.toLongOrNull()
+    }
+
+    data class FolderVideo(val uri: Uri, val id: Long, val name: String, val size: Long, val subFolder: String)
+
+    /** Movies/Bağlama Arşivi altındaki tüm videolar (kullanıcının elle koyduklarını görmek için okuma izni gerekir). */
+    fun scanArchiveFolder(context: Context): List<FolderVideo> {
+        if (!galleryEnabled) return emptyList()
+        val out = mutableListOf<FolderVideo>()
+        try {
+            val collection = MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL)
+            context.contentResolver.query(
+                collection,
+                arrayOf(MediaStore.Video.Media._ID, MediaStore.Video.Media.DISPLAY_NAME, MediaStore.Video.Media.SIZE, MediaStore.Video.Media.RELATIVE_PATH),
+                "${MediaStore.Video.Media.RELATIVE_PATH} LIKE ? AND ${MediaStore.Video.Media.IS_PENDING} = 0",
+                arrayOf("Movies/$ROOT_FOLDER/%"),
+                null
+            )?.use { c ->
+                while (c.moveToNext()) {
+                    val id = c.getLong(0)
+                    val rel = (c.getString(3) ?: "").trimEnd('/')
+                    val sub = rel.removePrefix("Movies/$ROOT_FOLDER").trim('/').substringBefore('/')
+                    out += FolderVideo(android.content.ContentUris.withAppendedId(collection, id), id, c.getString(1) ?: "video.mp4", c.getLong(2), sub)
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "klasör taranamadı", e)
+        }
+        return out
+    }
+
+    /** Seçilen video zaten Bağlama Arşivi klasöründe duruyorsa onun galeri adresini döner (yeniden kopyalamamak için). */
+    fun findInArchiveFolder(context: Context, source: Uri): Uri? {
+        if (!galleryEnabled) return null
+        // Doğrudan galeri adresi verildiyse klasörünü kontrol et
+        try {
+            if (source.authority == MediaStore.AUTHORITY) {
+                context.contentResolver.query(source, arrayOf(MediaStore.Video.Media.RELATIVE_PATH), null, null, null)?.use { c ->
+                    if (c.moveToFirst() && (c.getString(0) ?: "").startsWith("Movies/$ROOT_FOLDER")) {
+                        val id = source.lastPathSegment?.toLongOrNull()
+                        if (id != null) return android.content.ContentUris.withAppendedId(MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL), id)
+                    }
+                }
+            }
+        } catch (_: Exception) {
+        }
+        // Seçici/dosya yöneticisi adresi: ad + boyuta göre ara
+        val info = sourceInfo(context, source) ?: return null
+        return scanArchiveFolder(context).firstOrNull { it.name == info.first && it.size == info.second }?.uri
+    }
+
+    fun hasReadPermission(context: Context): Boolean {
+        val perm = if (Build.VERSION.SDK_INT >= 33) android.Manifest.permission.READ_MEDIA_VIDEO else android.Manifest.permission.READ_EXTERNAL_STORAGE
+        return androidx.core.content.ContextCompat.checkSelfPermission(context, perm) == android.content.pm.PackageManager.PERMISSION_GRANTED
+    }
+
+    // ---- Kullanıcının "arşivden çıkar ama telefonda kalsın" dediği videolar: klasör taramasında yeniden eklenmesin
+    private const val IGNORE_PREFS = "video_klasor"
+    fun ignore(context: Context, path: String?) {
+        val id = mediaId(path) ?: return
+        val p = context.getSharedPreferences(IGNORE_PREFS, Context.MODE_PRIVATE)
+        val set = p.getStringSet("yoksay", emptySet())!!.toMutableSet()
+        set += id.toString()
+        p.edit().putStringSet("yoksay", set).apply()
+    }
+
+    fun ignored(context: Context): Set<Long> =
+        context.getSharedPreferences(IGNORE_PREFS, Context.MODE_PRIVATE).getStringSet("yoksay", emptySet())!!.mapNotNull { it.toLongOrNull() }.toSet()
+
+    fun unignore(context: Context, id: Long) {
+        val p = context.getSharedPreferences(IGNORE_PREFS, Context.MODE_PRIVATE)
+        val set = p.getStringSet("yoksay", emptySet())!!.toMutableSet()
+        if (set.remove(id.toString())) p.edit().putStringSet("yoksay", set).apply()
     }
 
     private fun uniqueFile(dir: File, name: String): File {

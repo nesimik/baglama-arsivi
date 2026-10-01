@@ -135,8 +135,18 @@ fun PlayerScreen(vm: MainViewModel, startVideoId: Long) {
         ExoPlayer.Builder(context)
             .setSeekBackIncrementMs(5000)
             .setSeekForwardIncrementMs(5000)
+            // Başka uygulama ses çalarsa (ör. arama, müzik) otomatik duraklar; kulaklık çıkınca durur
+            .setAudioAttributes(
+                androidx.media3.common.AudioAttributes.Builder()
+                    .setUsage(androidx.media3.common.C.USAGE_MEDIA)
+                    .setContentType(androidx.media3.common.C.AUDIO_CONTENT_TYPE_MOVIE)
+                    .build(),
+                true
+            )
+            .setHandleAudioBecomingNoisy(true)
             .build()
     }
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
     var isPlaying by remember { mutableStateOf(false) }
     var position by remember { mutableLongStateOf(0L) }
     var duration by remember { mutableLongStateOf(0L) }
@@ -157,6 +167,11 @@ fun PlayerScreen(vm: MainViewModel, startVideoId: Long) {
     var seeking by remember { mutableStateOf(false) }
     var seekValue by remember { mutableFloatStateOf(0f) }
     var loadedId by remember { mutableLongStateOf(-1L) }
+    var reloadKey by remember { mutableIntStateOf(0) }
+    var relinkFor by remember { mutableStateOf<VideoItem?>(null) }
+    val relinkLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenDocument()
+    ) { uri -> val target = relinkFor; if (uri != null && target != null) { loadedId = -1; vm.relinkVideo(target, uri) }; relinkFor = null }
     var fileMissing by remember { mutableStateOf(false) }
     var markerDialog by remember { mutableStateOf<VideoMarker?>(null) }
     var addMarkerAt by remember { mutableLongStateOf(-1L) }
@@ -184,11 +199,17 @@ fun PlayerScreen(vm: MainViewModel, startVideoId: Long) {
     }
 
     // Video yükle
-    LaunchedEffect(v?.id, v?.localPath) {
+    var loadedPath by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(v?.id, v?.localPath, reloadKey) {
         val vv = v ?: return@LaunchedEffect
-        if (loadedId == vv.id) return@LaunchedEffect
+        if (loadedId == vv.id && loadedPath == vv.localPath) {
+            // Aynı video: sadece dosya hâlâ duruyor mu kontrol et
+            fileMissing = !com.nesimi.baglamaarsivi.util.VideoStore.exists(context, vv.localPath)
+            if (fileMissing) player.pause()
+            return@LaunchedEffect
+        }
         val playUri = com.nesimi.baglamaarsivi.util.VideoStore.uri(context, vv.localPath)
-        if (playUri == null) { fileMissing = true; return@LaunchedEffect }
+        if (playUri == null) { fileMissing = true; player.stop(); player.clearMediaItems(); loadedId = vv.id; loadedPath = vv.localPath; return@LaunchedEffect }
         fileMissing = false
         player.setMediaItem(MediaItem.fromUri(playUri))
         player.prepare()
@@ -197,6 +218,7 @@ fun PlayerScreen(vm: MainViewModel, startVideoId: Long) {
         player.playbackParameters = PlaybackParameters(speed)
         player.playWhenReady = true
         loadedId = vv.id
+        loadedPath = vv.localPath
     }
 
     // Oynatıcı olayları
@@ -277,6 +299,27 @@ fun PlayerScreen(vm: MainViewModel, startVideoId: Long) {
 
     LaunchedEffect(mirror, playerView) { playerView?.videoSurfaceView?.scaleX = if (mirror) -1f else 1f }
 
+    // Başka ekrana / uygulamaya geçince duraklat; geri gelince kullanıcı dokunana kadar bekle
+    DisposableEffect(lifecycleOwner) {
+        val obs = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            when (event) {
+                androidx.lifecycle.Lifecycle.Event.ON_STOP -> {
+                    if (player.isPlaying || player.playWhenReady) {
+                        player.pause()
+                        saveProgress()
+                    }
+                }
+                androidx.lifecycle.Lifecycle.Event.ON_START -> {
+                    controlsVisible = true
+                    if (fileMissing || loadedId > 0) reloadKey++ // dosya bu arada silinmiş/yeniden bağlanmış olabilir
+                }
+                else -> {}
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(obs)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
+    }
+
     DisposableEffect(Unit) {
         onDispose {
             saveProgress()
@@ -341,7 +384,23 @@ fun PlayerScreen(vm: MainViewModel, startVideoId: Long) {
                 )
             }
             if (fileMissing) {
-                Text("Video dosyası bulunamadı.\nYedekten geri yüklemeniz gerekebilir.", color = Color.White, modifier = Modifier.align(Alignment.Center).padding(24.dp))
+                Column(
+                    Modifier.align(Alignment.Center).fillMaxWidth().background(Color.Black.copy(alpha = 0.85f)).padding(16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text("⚠️ Bu videonun dosyası telefondan silinmiş.", color = Color.White, fontWeight = FontWeight.Bold)
+                    Text("Arşivden kaldırabilir ya da başka bir video dosyasına bağlayabilirsin.", color = Color.White.copy(alpha = 0.8f), fontSize = 12.sp)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 8.dp)) {
+                        androidx.compose.material3.OutlinedButton(onClick = {
+                            v?.let { gone ->
+                                val n = next ?: prev
+                                vm.removeMissingVideo(gone)
+                                if (n != null) switchTo(n) else vm.back()
+                            }
+                        }) { Text("Arşivden kaldır", color = Color.White) }
+                        androidx.compose.material3.Button(onClick = { relinkFor = v; relinkLauncher.launch(arrayOf("video/*")) }) { Text("Dosya seç ve bağla") }
+                    }
+                }
             }
             if (controlsVisible) {
                 Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.35f))) {

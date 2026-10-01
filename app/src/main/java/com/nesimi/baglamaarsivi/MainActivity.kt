@@ -87,6 +87,13 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onStart() {
+        super.onStart()
+        // Movies/Bağlama Arşivi klasörüne elle konan videoları ve silinenleri yakala
+        vm.syncFolder()
+        com.nesimi.baglamaarsivi.util.VideoStore.checkTick.value++
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
@@ -126,6 +133,22 @@ private fun AppRoot(vm: MainViewModel) {
     val snackbar = remember { SnackbarHostState() }
 
     LaunchedEffect(Unit) { vm.messages.collect { snackbar.showSnackbar(it) } }
+
+    // Klasöre elle konan videoları görebilmek için bir kez video okuma izni iste
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val permLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
+    ) { granted -> if (granted) vm.syncFolder(force = false) }
+    LaunchedEffect(Unit) {
+        val prefs = ctx.getSharedPreferences("baglama_arsivi_ayarlar", android.content.Context.MODE_PRIVATE)
+        if (com.nesimi.baglamaarsivi.util.VideoStore.galleryEnabled &&
+            !com.nesimi.baglamaarsivi.util.VideoStore.hasReadPermission(ctx) &&
+            !prefs.getBoolean("video_izni_soruldu", false)
+        ) {
+            prefs.edit().putBoolean("video_izni_soruldu", true).apply()
+            permLauncher.launch(if (Build.VERSION.SDK_INT >= 33) android.Manifest.permission.READ_MEDIA_VIDEO else android.Manifest.permission.READ_EXTERNAL_STORAGE)
+        }
+    }
     BackHandler(enabled = stack.size > 1) { vm.back() }
 
     val tab = when (screen) {

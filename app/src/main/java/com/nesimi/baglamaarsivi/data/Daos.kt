@@ -24,6 +24,9 @@ interface TurkuDao {
     @Query("SELECT COUNT(*) FROM turkuler")
     suspend fun countAll(): Int
 
+    @Query("SELECT * FROM turkuler")
+    suspend fun allSync(): List<Turku>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(turku: Turku): Long
 

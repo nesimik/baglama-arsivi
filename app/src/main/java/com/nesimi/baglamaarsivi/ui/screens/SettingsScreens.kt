@@ -214,7 +214,14 @@ fun StorageScreen(vm: MainViewModel) {
                         Text("🖼️ Önbellek ve küçük resimler: ${Tr.size(storage.cacheBytes)}")
                         Text("📱 Telefonda boş alan: ${Tr.size(storage.freeDeviceBytes)}")
                         Spacer(Modifier.height(8.dp))
-                        OutlinedButton(onClick = { vm.clearCache() }) { Text("Önbelleği temizle") }
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(onClick = { vm.clearCache() }) { Text("Önbelleği temizle") }
+                            if (com.nesimi.baglamaarsivi.util.VideoStore.galleryEnabled) OutlinedButton(onClick = { vm.syncFolder(force = true) }) { Text("Klasörü tara") }
+                        }
+                        if (com.nesimi.baglamaarsivi.util.VideoStore.galleryEnabled) Text(
+                            "Movies/Bağlama Arşivi/<türkü adı> klasörüne kendin koyduğun videolar uygulama açılınca otomatik eklenir (alt klasör adı = türkü adı).",
+                            fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp)
+                        )
                     }
                 }
             }
