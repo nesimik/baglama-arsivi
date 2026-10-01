@@ -28,12 +28,13 @@ jobs:
         run: |
           mkdir -p cikti
           cp app/build/outputs/apk/release/app-release.apk "cikti/BaglamaArsivi-v2.0.${{ github.run_number }}.apk"
+          cp app/build/outputs/apk/release/app-release.apk "cikti/BaglamaArsivi.apk"
 
       - name: APK'yı yükle
         uses: actions/upload-artifact@v4
         with:
           name: BaglamaArsivi-v2.0.${{ github.run_number }}
-          path: cikti/*.apk
+          path: cikti/BaglamaArsivi-v*.apk
           if-no-files-found: error
 
       - name: Sürüm sayfasına koy (telefondan kolay indirme)

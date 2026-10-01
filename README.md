@@ -4,6 +4,7 @@ Bağlama derslerinin videoları, notaları ve çalışma takibi için kişisel A
 (Kotlin + Jetpack Compose). Tüm veriler telefonda saklanır, internet gerekmez.
 
 ## APK'yı indirme
+- **Her zaman en son sürüm (sabit link):** https://github.com/nesimik/baglama-arsivi/releases/latest/download/BaglamaArsivi.apk
 - **En kolayı:** Sağdaki **Releases** bölümünden en son sürümün `.apk` dosyasını telefondan indir ve kur.
 - Ya da **Actions** sekmesi → en son başarılı derleme → *Artifacts*.
 
