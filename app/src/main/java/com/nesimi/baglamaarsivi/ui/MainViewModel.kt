@@ -71,7 +71,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     // ---------------------------------------------------------------- Mesajlar
     private val _messages = MutableSharedFlow<String>(extraBufferCapacity = 8)
     val messages: SharedFlow<String> = _messages.asSharedFlow()
-    fun toast(msg: String) { _messages.tryEmit(msg) }
+    /**
+     * Alt bilgi mesajı. Kullanıcı isteğiyle rutin işlemler (sildim, durum değişti, kaydedildi…) GÖSTERİLMEZ;
+     * yalnızca hatalar, uyarılar ve yedek sonucu gibi bilmesi gereken şeyler gösterilir.
+     */
+    fun toast(msg: String) {
+        if (IMPORTANT.any { msg.contains(it, ignoreCase = true) }) _messages.tryEmit(msg)
+    }
+
+    private val IMPORTANT = listOf(
+        "alınamadı", "kaydedilemedi", "başarısız", "bulunamadı", "Bağlanamadı", "Silinemedi", "oluşturulamadı",
+        "açacak uygulama", "Yedek hazır", "Önce A noktasını", "Çok kısa", "İzin verilmedi", "Fazladan kopya yok", "hata"
+    )
 
     // ---------------------------------------------------------------- Tema
     private val _theme = MutableStateFlow(
