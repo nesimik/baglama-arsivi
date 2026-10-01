@@ -226,7 +226,7 @@ fun StorageScreen(vm: MainViewModel) {
                             if (com.nesimi.baglamaarsivi.util.VideoStore.galleryEnabled) OutlinedButton(onClick = { vm.syncFolder(force = true) }) { Text("Fazladan kopyaları temizle") }
                         }
                         if (com.nesimi.baglamaarsivi.util.VideoStore.galleryEnabled) Text(
-                            "Uygulama videoları kopyalamaz, telefondaki asıl yerinden (ör. WhatsApp klasörü) oynatır. Uygulamadan silinen video telefondan da silinir; telefondan silinen video uygulamadan da kalkar. Yedek Al ile hepsi tek .zip dosyasına toplanır.",
+                            "Uygulama videoları kopyalamaz, telefondaki asıl yerinden (ör. WhatsApp klasörü) oynatır. Uygulamadan kaldırılan video telefonda kalır; telefondan sildiğin video uygulamadan da kalkar. Yedek Al ile hepsi tek .zip dosyasına toplanır.",
                             fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp)
                         )
                     }
@@ -275,9 +275,9 @@ fun TrashScreen(vm: MainViewModel) {
             }
         }
     }
-    if (confirmEmpty) ConfirmDialog("Çöp kutusu boşaltılsın mı?", "Silinenler ve video dosyaları telefondan da kalıcı olarak silinir.", "Boşalt", { vm.emptyTrash() }, { confirmEmpty = false })
-    confirmT?.let { t -> ConfirmDialog("Kalıcı silinsin mi?", "“${t.name}” ve videoları telefondan da kalıcı olarak silinir.", "Kalıcı Sil", { vm.deleteTurkuForever(t.id) }, { confirmT = null }) }
-    confirmV?.let { v -> ConfirmDialog("Kalıcı silinsin mi?", "“${v.title}” telefondan da kalıcı olarak silinir.", "Kalıcı Sil", { vm.deleteVideoForever(v) }, { confirmV = null }) }
+    if (confirmEmpty) ConfirmDialog("Çöp kutusu boşaltılsın mı?", "Silinenler arşivden kalıcı olarak kaldırılır. Telefondaki video dosyaları silinmez.", "Boşalt", { vm.emptyTrash() }, { confirmEmpty = false })
+    confirmT?.let { t -> ConfirmDialog("Kalıcı silinsin mi?", "“${t.name}” ve videoları arşivden kalıcı olarak kaldırılır. Telefondaki dosyalar silinmez.", "Kalıcı Sil", { vm.deleteTurkuForever(t.id) }, { confirmT = null }) }
+    confirmV?.let { v -> ConfirmDialog("Kalıcı silinsin mi?", "“${v.title}” arşivden kalıcı olarak kaldırılır. Telefondaki dosya silinmez.", "Kalıcı Sil", { vm.deleteVideoForever(v) }, { confirmV = null }) }
     confirmD?.let { d -> ConfirmDialog("Kalıcı silinsin mi?", "“${d.title}” dosyasıyla birlikte silinir.", "Kalıcı Sil", { vm.deleteDocForever(d) }, { confirmD = null }) }
 }
 

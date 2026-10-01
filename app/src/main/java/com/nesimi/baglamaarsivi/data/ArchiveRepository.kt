@@ -94,11 +94,15 @@ class ArchiveRepository(private val context: Context) {
         ok
     }
 
-    private fun removeVideoFiles(v: VideoItem, deleteFile: Boolean): Boolean {
+    /**
+     * KURAL: Uygulama telefondaki video dosyalarına (galeri, WhatsApp, Bağlama Arşivi klasörü) ASLA dokunmaz.
+     * Yalnızca uygulamanın kendi gizli klasöründeki (galeride görünmeyen) kopyaları ve küçük resimleri siler.
+     */
+    private fun removeVideoFiles(v: VideoItem, @Suppress("UNUSED_PARAMETER") deleteFile: Boolean): Boolean {
         FileManager.delete(v.thumbnailPath)
-        if (!deleteFile) return true
-        // Aynı dosyayı kullanan başka kayıt varsa dosyayı silme
-        return VideoStore.delete(context, v.localPath)
+        val p = v.localPath
+        if (!VideoStore.isContent(p) && p.startsWith(context.filesDir.absolutePath)) FileManager.delete(p)
+        return true
     }
 
     data class ImportResult(val id: Long, val duplicateOf: String?, val source: Pair<String, Long>? = null)

@@ -237,13 +237,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         toast(if (tag.isBlank()) "Sıra numarası kaldırıldı" else "Sıra: #${tag.trim()}")
     }
     fun updateVideo(v: VideoItem) = viewModelScope.launch { repo.updateVideo(v); toast("Video bilgileri kaydedildi") }
-    /** Videoyu arşivden VE telefondan (Bağlama Arşivi klasöründen) siler. */
+    /** Videoyu yalnızca arşivden kaldırır; telefondaki dosyaya dokunmaz. */
     fun deleteVideo(id: Long) = viewModelScope.launch {
         val v = repo.videoSync(id) ?: return@launch
-        val ok = repo.deleteVideoForever(v, deleteGalleryFile = true)
+        repo.deleteVideoForever(v, deleteGalleryFile = false)
         refreshStorage()
-        if (ok) toast("Video silindi (telefondan da)")
-        else requestSystemDelete(listOf(v.localPath), askFirst = false, reason = "")
+        toast("Video arşivden kaldırıldı (telefondaki dosya duruyor)")
     }
     fun savePosition(id: Long, pos: Long) = viewModelScope.launch { repo.setVideoPosition(id, pos) }
     fun saveDuration(id: Long, dur: Long) = viewModelScope.launch { repo.setVideoDuration(id, dur) }
@@ -282,18 +281,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
         _busy.value = null
         refreshStorage()
-        toast("$n video silindi")
-        if (failed.isNotEmpty()) requestSystemDelete(failed, askFirst = false, reason = "")
+        toast("$n video arşivden kaldırıldı (telefondaki dosyalar duruyor)")
     }
 
     fun deleteTurkuForever(id: Long) = viewModelScope.launch {
         val failed = repo.deleteTurkuForever(id, true); refreshStorage()
-        toast("Türkü ve videoları silindi")
-        if (failed.isNotEmpty()) requestSystemDelete(failed, askFirst = false, reason = "")
+        toast("Türkü arşivden silindi (telefondaki videolar duruyor)")
     }
     fun deleteVideoForever(v: VideoItem) = viewModelScope.launch {
-        val ok = repo.deleteVideoForever(v, true); refreshStorage()
-        if (ok) toast("Video telefondan da silindi") else requestSystemDelete(listOf(v.localPath), askFirst = false, reason = "")
+        repo.deleteVideoForever(v, false); refreshStorage()
+        toast("Arşivden kaldırıldı (telefondaki dosya duruyor)")
     }
     fun deleteDocForever(d: DocumentItem) = viewModelScope.launch { repo.deleteDocForever(d); refreshStorage(); toast("Kalıcı olarak silindi") }
     fun emptyTrash() = viewModelScope.launch {
@@ -301,7 +298,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         deletedVideos.value.forEach { if (!repo.deleteVideoForever(it, true)) failed += it.localPath }
         deletedDocs.value.forEach { repo.deleteDocForever(it) }
         deletedTurkus.value.forEach { failed += repo.deleteTurkuForever(it.id, true) }
-        if (failed.isNotEmpty()) requestSystemDelete(failed, askFirst = false, reason = "")
+
         refreshStorage()
         toast("Çöp kutusu boşaltıldı")
     }

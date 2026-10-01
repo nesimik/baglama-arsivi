@@ -309,9 +309,9 @@ fun VideoCard(
                 }
                 if (confirmDelete && onDelete != null) {
                     ConfirmDialog(
-                        "Video silinsin mi?",
-                        "“${video.title}” arşivden ve telefondan (Bağlama Arşivi klasöründen) silinecek. Geri alınamaz.",
-                        "Sil", onConfirm = { onDelete() }, onDismiss = { confirmDelete = false }
+                        "Arşivden kaldırılsın mı?",
+                        "“${video.title}” uygulamadan kaldırılacak. Telefondaki video dosyası silinmez.",
+                        "Kaldır", onConfirm = { onDelete() }, onDismiss = { confirmDelete = false }
                     )
                 }
             }

@@ -277,9 +277,9 @@ fun TurkuDetailScreen(vm: MainViewModel, turkuId: Long) {
     editVideo?.let { v -> VideoEditDialog(vm, v, onDismiss = { editVideo = null }) }
     editDoc?.let { d -> DocEditDialog(vm, d, onDismiss = { editDoc = null }) }
     if (confirmBulkDelete) ConfirmDialog(
-        "${selectedIds.size} video silinsin mi?",
-        "Seçilen videolar arşivden ve telefondan silinecek. Geri alınamaz.",
-        "Sil",
+        "${selectedIds.size} video arşivden kaldırılsın mı?",
+        "Seçilen videolar uygulamadan kaldırılacak. Telefondaki video dosyaları silinmez.",
+        "Kaldır",
         onConfirm = { vm.deleteVideos(selectedIds.toList()); selectedIds.clear(); selectionMode = false },
         onDismiss = { confirmBulkDelete = false }
     )
