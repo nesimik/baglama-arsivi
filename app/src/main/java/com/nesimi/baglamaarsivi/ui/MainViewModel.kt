@@ -237,7 +237,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         toast(if (tag.isBlank()) "Sıra numarası kaldırıldı" else "Sıra: #${tag.trim()}")
     }
     fun updateVideo(v: VideoItem) = viewModelScope.launch { repo.updateVideo(v); toast("Video bilgileri kaydedildi") }
-    fun deleteVideo(id: Long) = viewModelScope.launch { repo.softDeleteVideo(id); toast("Video çöp kutusuna taşındı"); refreshStorage() }
+    /** Videoyu arşivden VE telefondan (Bağlama Arşivi klasöründen) siler. */
+    fun deleteVideo(id: Long) = viewModelScope.launch {
+        val v = repo.videoSync(id) ?: return@launch
+        val ok = repo.deleteVideoForever(v, deleteGalleryFile = true)
+        refreshStorage()
+        if (ok) toast("Video silindi (telefondan da)")
+        else requestSystemDelete(listOf(v.localPath), askFirst = false, reason = "")
+    }
     fun savePosition(id: Long, pos: Long) = viewModelScope.launch { repo.setVideoPosition(id, pos) }
     fun saveDuration(id: Long, dur: Long) = viewModelScope.launch { repo.setVideoDuration(id, dur) }
 
@@ -263,19 +270,22 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun restoreTurku(id: Long) = viewModelScope.launch { repo.restoreTurku(id); toast("Geri yüklendi") }
     fun restoreVideo(id: Long) = viewModelScope.launch { repo.restoreVideo(id); toast("Geri yüklendi") }
     fun restoreDoc(id: Long) = viewModelScope.launch { repo.restoreDoc(id); toast("Geri yüklendi") }
-    fun deleteTurkuForever(id: Long, deleteFiles: Boolean = false) = viewModelScope.launch {
-        repo.deleteTurkuForever(id, deleteFiles); refreshStorage()
-        toast(if (deleteFiles) "Türkü ve videoları silindi" else "Arşivden çıkarıldı (videolar telefonda duruyor)")
+    fun deleteTurkuForever(id: Long) = viewModelScope.launch {
+        val failed = repo.deleteTurkuForever(id, true); refreshStorage()
+        toast("Türkü ve videoları silindi")
+        if (failed.isNotEmpty()) requestSystemDelete(failed, askFirst = false, reason = "")
     }
-    fun deleteVideoForever(v: VideoItem, deleteFile: Boolean = false) = viewModelScope.launch {
-        repo.deleteVideoForever(v, deleteFile); refreshStorage()
-        toast(if (deleteFile) "Video telefondan da silindi" else "Arşivden çıkarıldı (video telefonda duruyor)")
+    fun deleteVideoForever(v: VideoItem) = viewModelScope.launch {
+        val ok = repo.deleteVideoForever(v, true); refreshStorage()
+        if (ok) toast("Video telefondan da silindi") else requestSystemDelete(listOf(v.localPath), askFirst = false, reason = "")
     }
     fun deleteDocForever(d: DocumentItem) = viewModelScope.launch { repo.deleteDocForever(d); refreshStorage(); toast("Kalıcı olarak silindi") }
-    fun emptyTrash(deleteFiles: Boolean = false) = viewModelScope.launch {
-        deletedVideos.value.forEach { repo.deleteVideoForever(it, deleteFiles) }
+    fun emptyTrash() = viewModelScope.launch {
+        val failed = mutableListOf<String>()
+        deletedVideos.value.forEach { if (!repo.deleteVideoForever(it, true)) failed += it.localPath }
         deletedDocs.value.forEach { repo.deleteDocForever(it) }
-        deletedTurkus.value.forEach { repo.deleteTurkuForever(it.id, deleteFiles) }
+        deletedTurkus.value.forEach { failed += repo.deleteTurkuForever(it.id, true) }
+        if (failed.isNotEmpty()) requestSystemDelete(failed, askFirst = false, reason = "")
         refreshStorage()
         toast("Çöp kutusu boşaltıldı")
     }
@@ -286,31 +296,43 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val _busy = MutableStateFlow<BusyState?>(null)
     val busy: StateFlow<BusyState?> = _busy.asStateFlow()
 
-    // Orijinalleri silme (WhatsApp vb.) – içe aktarmadan sonra kullanıcıya sorulur
-    private val _pendingOriginals = MutableStateFlow<List<Pair<String, Long>>>(emptyList())
-    val pendingOriginals: StateFlow<List<Pair<String, Long>>> = _pendingOriginals.asStateFlow()
-    fun clearPendingOriginals() { _pendingOriginals.value = emptyList() }
-
-    var deleteOriginalsPref: Boolean
-        get() = prefs.getBoolean("orijinal_sil", true)
-        set(v) { prefs.edit().putBoolean("orijinal_sil", v).apply() }
+    /** Telefonun "Silinsin mi?" onayıyla silinecek dosyalar (başka uygulamaya ait olanlar, ör. WhatsApp) */
+    data class SystemDelete(val uris: List<Uri>, val askFirst: Boolean, val reason: String)
+    private val _systemDelete = MutableStateFlow<SystemDelete?>(null)
+    val systemDelete: StateFlow<SystemDelete?> = _systemDelete.asStateFlow()
+    fun clearSystemDelete() { _systemDelete.value = null }
+    /** "Silme, kalsın" denen çift kopyalar bir daha sorulmasın */
+    fun declineDuplicates(uris: List<Uri>) {
+        val set = prefs.getStringSet("kopya_sorma", emptySet())!!.toMutableSet()
+        uris.forEach { set += it.toString() }
+        prefs.edit().putStringSet("kopya_sorma", set).apply()
+        _systemDelete.value = null
+    }
+    fun requestSystemDelete(paths: List<String>, askFirst: Boolean, reason: String) {
+        val uris = paths.filter { com.nesimi.baglamaarsivi.util.VideoStore.isContent(it) }.map { Uri.parse(it) }
+        if (uris.isEmpty()) return
+        _systemDelete.value = SystemDelete(uris, askFirst, reason)
+    }
+    fun requestSystemDeleteUris(uris: List<Uri>, askFirst: Boolean, reason: String) {
+        if (uris.isNotEmpty()) _systemDelete.value = SystemDelete(uris, askFirst, reason)
+    }
 
     fun importVideos(
         items: List<StagedVideo>, turkuId: Long, lessonDate: String, instructor: String,
         description: String, tags: String, status: StudyStatus?, favorite: Boolean,
-        deleteOriginals: Boolean = false, onDone: () -> Unit
+        onDone: () -> Unit
     ) {
         viewModelScope.launch {
             var ok = 0
             val dups = mutableListOf<String>()
-            val sources = mutableListOf<Pair<String, Long>>()
+
             items.forEachIndexed { i, it ->
                 _busy.value = BusyState("Video kaydediliyor ${i + 1}/${items.size}", BackupProgress(it.title, i.toLong(), items.size.toLong()))
                 try {
                     val r = repo.importVideo(it.uri, turkuId, it.title, lessonDate, instructor, description, tags, it.orderTag, i + 1, favorite)
                     ok++
                     r.duplicateOf?.let { d -> dups += d }
-                    r.source?.let { src -> sources += src }
+
                 } catch (e: Exception) {
                     toast("“${it.title}” kaydedilemedi: ${e.message}")
                 }
@@ -320,7 +342,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             refreshStorage()
             toast(if (dups.isEmpty()) "$ok video arşive eklendi ✅" else "$ok video eklendi. Uyarı: ${dups.size} tanesi daha önce de eklenmiş olabilir.")
             onDone()
-            if (deleteOriginals && sources.isNotEmpty() && com.nesimi.baglamaarsivi.util.VideoStore.galleryEnabled) _pendingOriginals.value = sources
+            com.nesimi.baglamaarsivi.util.VideoStore.checkTick.value++
         }
     }
 
@@ -360,16 +382,27 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---------------------------------------------------------------- Klasör eşitleme
     private var lastSync = 0L
-    /** Movies/Bağlama Arşivi klasöründeki yeni videoları arşive ekler (uygulama her öne geldiğinde). */
+    private var dupChecked = false
+    /**
+     * Uygulama öne gelince: telefondan silinen videoları arşivden de kaldırır ve
+     * (oturumda bir kez) galeride ikinci kopyası duran videoları bulup silmeyi teklif eder.
+     */
     fun syncFolder(force: Boolean = false) {
         val now = System.currentTimeMillis()
-        if (!force && now - lastSync < 5000) return
+        if (!force && now - lastSync < 3000) return
         lastSync = now
         viewModelScope.launch {
-            val n = runCatching { repo.syncArchiveFolder() }.getOrDefault(0)
-            if (n > 0) { toast("📂 Klasörden $n yeni video arşive eklendi"); refreshStorage() }
-            else if (force) toast("Klasörde yeni video yok")
+            val n = runCatching { repo.removeVideosDeletedFromPhone() }.getOrDefault(0)
+            if (n > 0) { toast("🗑️ Telefondan silinen $n video arşivden de kaldırıldı"); refreshStorage() }
             com.nesimi.baglamaarsivi.util.VideoStore.checkTick.value++
+            if (!dupChecked || force) {
+                dupChecked = true
+                val declined = prefs.getStringSet("kopya_sorma", emptySet())!!
+                val dups = runCatching { repo.findDuplicateCopies() }.getOrDefault(emptyList()).filter { force || it.toString() !in declined }
+                if (dups.isNotEmpty()) requestSystemDeleteUris(dups, askFirst = true,
+                    reason = "${dups.size} videonun galeride ikinci bir kopyası var (genelde WhatsApp klasöründe). Arşivdeki kopya Bağlama Arşivi klasöründe duruyor.")
+                else if (force) toast("Çift kopya bulunamadı ✅")
+            }
         }
     }
 

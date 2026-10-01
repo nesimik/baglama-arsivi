@@ -73,17 +73,107 @@ object VideoStore {
         }
     }
 
-    /** Videoyu siler. Galerideki dosyalar yalnızca açıkça istendiğinde silinir. */
+    /**
+     * Video dosyasını telefondan siler. Başka uygulamaya ait dosyada (ör. WhatsApp) izin yoksa false döner;
+     * o durumda arayan taraf sistemin "Silinsin mi?" onayını istemelidir.
+     */
     fun delete(context: Context, path: String?): Boolean {
         if (path.isNullOrBlank()) return false
-        return if (isContent(path)) {
-            try {
-                context.contentResolver.delete(Uri.parse(path), null, null) > 0
-            } catch (e: Exception) {
-                Log.w(TAG, "silinemedi $path", e)
-                false
+        if (!isContent(path)) {
+            val f = File(path)
+            if (f.isAbsolute && f.path.startsWith("/storage/")) {
+                val ok = f.delete()
+                if (ok) scanQuietly(context, f.path)
+                return ok
             }
-        } else FileManager.delete(path)
+            return FileManager.delete(path)
+        }
+        val uri = Uri.parse(path)
+        if (!exists(context, path)) return true
+        try {
+            if (context.contentResolver.delete(uri, null, null) > 0) return true
+        } catch (e: Exception) {
+            Log.w(TAG, "silinemedi $path", e)
+        }
+        if (hasAllFilesAccess()) {
+            val dp = dataPath(context, uri)
+            if (dp != null && File(dp).delete()) {
+                scanQuietly(context, dp)
+                return true
+            }
+        }
+        return !exists(context, path)
+    }
+
+    /** "Tüm dosyalara erişim" izni (dosyaları gerçekten taşıyıp silebilmek için) */
+    fun hasAllFilesAccess(): Boolean = when {
+        Build.VERSION.SDK_INT >= 30 -> android.os.Environment.isExternalStorageManager()
+        else -> false
+    }
+
+    /** Galeri kaydının telefondaki gerçek yolu (ör. /storage/emulated/0/Android/media/com.whatsapp/...). */
+    @Suppress("DEPRECATION")
+    fun dataPath(context: Context, uri: Uri): String? = try {
+        context.contentResolver.query(uri, arrayOf(MediaStore.MediaColumns.DATA), null, null, null)?.use { c ->
+            if (c.moveToFirst()) c.getString(0) else null
+        }
+    } catch (_: Exception) {
+        null
+    }
+
+    fun archiveDir(turkuName: String?): File =
+        File(android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_MOVIES), "$ROOT_FOLDER/${folderName(turkuName)}")
+
+    /**
+     * Orijinal dosyayı (ör. WhatsApp klasöründeki) Bağlama Arşivi klasörüne TAŞIR: kopya oluşmaz, galeride tek görünür.
+     * "Tüm dosyalara erişim" izni gerekir. Başarılıysa yeni galeri adresini döner.
+     */
+    suspend fun moveIntoArchive(context: Context, originalUri: Uri, fileName: String, turkuName: String?): Saved? {
+        if (!hasAllFilesAccess()) return null
+        val srcPath = dataPath(context, originalUri) ?: return null
+        val src = File(srcPath)
+        if (!src.exists()) return null
+        val dir = archiveDir(turkuName).apply { mkdirs() }
+        val dest = uniqueFile(dir, fileName)
+        val size = src.length()
+        val moved = src.renameTo(dest) || run {
+            try {
+                src.inputStream().use { i -> FileOutputStream(dest).use { o -> i.copyTo(o, 256 * 1024) } }
+                if (dest.length() == size) { src.delete(); true } else { dest.delete(); false }
+            } catch (_: Exception) {
+                dest.delete(); false
+            }
+        }
+        if (!moved) return null
+        scanQuietly(context, src.path) // eski konumu galeriden düşür
+        val newUri = scan(context, dest.path) ?: return Saved(dest.path, size, "")
+        return Saved(newUri.toString(), size, "")
+    }
+
+    private suspend fun scan(context: Context, path: String): Uri? =
+        kotlinx.coroutines.withTimeoutOrNull(8000) {
+            kotlinx.coroutines.suspendCancellableCoroutine<Uri?> { cont ->
+                android.media.MediaScannerConnection.scanFile(context, arrayOf(path), null) { _, uri ->
+                    if (cont.isActive) cont.resumeWith(Result.success(uri))
+                }
+            }
+        }
+
+    fun scanQuietly(context: Context, path: String) {
+        try { android.media.MediaScannerConnection.scanFile(context, arrayOf(path), null, null) } catch (_: Exception) {}
+    }
+
+    /** Bağlama Arşivi klasöründe mi? */
+    fun isInArchiveFolder(context: Context, path: String?): Boolean {
+        if (path.isNullOrBlank()) return false
+        if (!isContent(path)) return path.contains("/$ROOT_FOLDER/")
+        return try {
+            context.contentResolver.query(Uri.parse(path), arrayOf(MediaStore.Video.Media.RELATIVE_PATH), null, null, null)?.use { c ->
+                c.moveToFirst() && (c.getString(0) ?: "").startsWith("Movies/$ROOT_FOLDER")
+            } == true
+        } catch (_: Exception) {
+            false
+        }
     }
 
     fun folderName(turkuName: String?): String {
@@ -206,6 +296,24 @@ object VideoStore {
             Log.w(TAG, "orijinal aranamadı", e)
             null
         }
+    }
+
+    fun findOutsideArchiveBySize(context: Context, size: Long): List<Uri> {
+        if (!galleryEnabled || size <= 0) return emptyList()
+        val out = mutableListOf<Uri>()
+        try {
+            val collection = MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL)
+            context.contentResolver.query(
+                collection, arrayOf(MediaStore.Video.Media._ID, MediaStore.Video.Media.RELATIVE_PATH),
+                "${MediaStore.Video.Media.SIZE} = ?", arrayOf(size.toString()), null
+            )?.use { c ->
+                while (c.moveToNext()) {
+                    if (!(c.getString(1) ?: "").contains(ROOT_FOLDER)) out += android.content.ContentUris.withAppendedId(collection, c.getLong(0))
+                }
+            }
+        } catch (_: Exception) {
+        }
+        return out
     }
 
     fun sourceInfo(context: Context, uri: Uri): Pair<String, Long>? = try {

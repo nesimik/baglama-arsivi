@@ -94,6 +94,21 @@ class MainActivity : ComponentActivity() {
         com.nesimi.baglamaarsivi.util.VideoStore.checkTick.value++
     }
 
+    override fun onPause() {
+        super.onPause()
+        com.nesimi.baglamaarsivi.ui.screens.PlaybackGate.pause.tryEmit(Unit)
+    }
+
+    override fun onStop() {
+        super.onStop()
+        com.nesimi.baglamaarsivi.ui.screens.PlaybackGate.pause.tryEmit(Unit)
+    }
+
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        com.nesimi.baglamaarsivi.ui.screens.PlaybackGate.pause.tryEmit(Unit)
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)

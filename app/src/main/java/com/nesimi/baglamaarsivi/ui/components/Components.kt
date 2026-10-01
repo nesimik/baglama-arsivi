@@ -289,13 +289,21 @@ fun VideoCard(
             }
             if (onEdit != null || onDelete != null || onOrderClick != null) {
                 var menu by remember { mutableStateOf(false) }
+                var confirmDelete by remember { mutableStateOf(false) }
                 Box {
                     IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, "Diğer") }
                     DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                         if (onOrderClick != null) DropdownMenuItem(text = { Text("Sıra numarası ver") }, leadingIcon = { Icon(Icons.Default.Tag, null) }, onClick = { menu = false; onOrderClick() })
                         if (onEdit != null) DropdownMenuItem(text = { Text("Bilgileri düzenle") }, leadingIcon = { Icon(Icons.Default.Edit, null) }, onClick = { menu = false; onEdit() })
-                        if (onDelete != null) DropdownMenuItem(text = { Text("Sil") }, leadingIcon = { Icon(Icons.Default.Delete, null) }, onClick = { menu = false; onDelete() })
+                        if (onDelete != null) DropdownMenuItem(text = { Text("Sil") }, leadingIcon = { Icon(Icons.Default.Delete, null) }, onClick = { menu = false; confirmDelete = true })
                     }
+                }
+                if (confirmDelete && onDelete != null) {
+                    ConfirmDialog(
+                        "Video silinsin mi?",
+                        "“${video.title}” arşivden ve telefondan (Bağlama Arşivi klasöründen) silinecek. Geri alınamaz.",
+                        "Sil", onConfirm = { onDelete() }, onDismiss = { confirmDelete = false }
+                    )
                 }
             }
         }

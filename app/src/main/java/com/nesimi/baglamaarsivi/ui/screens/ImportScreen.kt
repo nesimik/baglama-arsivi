@@ -106,7 +106,18 @@ fun ImportScreen(vm: MainViewModel, screen: Screen.Import) {
     var tags by remember { mutableStateOf("") }
     var status by remember { mutableStateOf<StudyStatus?>(null) }
     var fav by remember { mutableStateOf(false) }
-    var deleteOriginals by remember { mutableStateOf(vm.deleteOriginalsPref) }
+    var allFiles by remember { mutableStateOf(com.nesimi.baglamaarsivi.util.VideoStore.hasAllFilesAccess()) }
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    androidx.compose.runtime.DisposableEffect(lifecycleOwner) {
+        val obs = androidx.lifecycle.LifecycleEventObserver { _, e ->
+            if (e == androidx.lifecycle.Lifecycle.Event.ON_RESUME) allFiles = com.nesimi.baglamaarsivi.util.VideoStore.hasAllFilesAccess()
+        }
+        lifecycleOwner.lifecycle.addObserver(obs)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
+    }
+    val readPerm = if (android.os.Build.VERSION.SDK_INT >= 33) android.Manifest.permission.READ_MEDIA_VIDEO else android.Manifest.permission.READ_EXTERNAL_STORAGE
+    var pendingSave by remember { mutableStateOf<(() -> Unit)?>(null) }
+    val readLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { pendingSave?.invoke(); pendingSave = null }
     var category by remember { mutableStateOf(DocumentCategory.NOTA) }
     var prefixDialog by remember { mutableStateOf(false) }
 
@@ -214,14 +225,20 @@ fun ImportScreen(vm: MainViewModel, screen: Screen.Import) {
                     Text("⭐ Favorilere ekle", modifier = Modifier.weight(1f))
                     Switch(checked = fav, onCheckedChange = { fav = it })
                 }
-                if (isVideo && com.nesimi.baglamaarsivi.util.VideoStore.galleryEnabled) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text("🧹 Sonra orijinalleri silmeyi sor")
-                            Text("Videolar Filmler/Bağlama Arşivi klasörüne kaydedilir. WhatsApp'taki kopyayı silersen tek kopya kalır; istersen \"Silme\" diyebilirsin.",
-                                fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (isVideo && android.os.Build.VERSION.SDK_INT >= 30 && !allFiles) {
+                    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer), modifier = Modifier.padding(top = 6.dp)) {
+                        Column(Modifier.padding(12.dp)) {
+                            Text("📁 Tek kopya için izin ver", fontWeight = FontWeight.Bold)
+                            Text("“Tüm dosyalara erişim” izni verirsen video WhatsApp klasöründen Bağlama Arşivi klasörüne TAŞINIR: galeride tek görünür, ikinci kopya oluşmaz. İzin vermezsen video WhatsApp'taki yerinde kalır ve oradan oynatılır (yine kopya oluşmaz).",
+                                fontSize = 12.sp)
+                            TextButton(onClick = {
+                                try {
+                                    context.startActivity(android.content.Intent(android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, android.net.Uri.parse("package:" + context.packageName)))
+                                } catch (_: Exception) {
+                                    context.startActivity(android.content.Intent(android.provider.Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
+                                }
+                            }) { Text("İzni ver (Ayarlar açılır)") }
                         }
-                        Switch(checked = deleteOriginals, onCheckedChange = { deleteOriginals = it; vm.deleteOriginalsPref = it })
                     }
                 }
                 Spacer(Modifier.height(8.dp))
@@ -229,19 +246,22 @@ fun ImportScreen(vm: MainViewModel, screen: Screen.Import) {
                     enabled = canSave,
                     modifier = Modifier.fillMaxWidth().height(52.dp),
                     onClick = {
-                        scope.launch {
+                        val save: () -> Unit = { scope.launch {
                             val target: Long? = if (newTurku) vm.createTurkuQuick(newName, newRegion) else turkuId
                             val items = staged.toList()
                             if (isVideo) {
                                 if (target == null) return@launch
                                 vm.importVideos(
                                     items.map { MainViewModel.StagedVideo(it.uri, it.title.trim(), it.order.trim()) },
-                                    target, lessonDate.trim(), instructor, desc, tags, status, fav, deleteOriginals
+                                    target, lessonDate.trim(), instructor, desc, tags, status, fav
                                 ) { vm.back(); vm.navigate(Screen.TurkuDetail(target)) }
                             } else {
                                 vm.importDocuments(items.map { it.uri to it.title.trim() }, target, category, fav) { vm.back() }
                             }
-                        }
+                        } }
+                        if (isVideo && com.nesimi.baglamaarsivi.util.VideoStore.galleryEnabled &&
+                            !com.nesimi.baglamaarsivi.util.VideoStore.hasReadPermission(context) && !allFiles
+                        ) { pendingSave = save; readLauncher.launch(readPerm) } else save()
                     }
                 ) {
                     Icon(Icons.Default.Save, null); Spacer(Modifier.width(6.dp))

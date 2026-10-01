@@ -113,6 +113,11 @@ private fun Context.findActivity(): Activity? {
     return null
 }
 
+/** Uygulama arka plana geçince (son uygulamalar, ana ekran, başka uygulama) oynatıcıyı duraklatmak için sinyal. */
+object PlaybackGate {
+    val pause = kotlinx.coroutines.flow.MutableSharedFlow<Unit>(extraBufferCapacity = 4)
+}
+
 private val SPEEDS = listOf(0.25f, 0.5f, 0.6f, 0.7f, 0.75f, 0.8f, 0.9f, 1.0f, 1.25f, 1.5f, 2.0f)
 
 private fun speedLabel(s: Float): String = (if (s == s.toInt().toFloat()) s.toInt().toString() else s.toString().trimEnd('0')) + "x"
@@ -299,17 +304,23 @@ fun PlayerScreen(vm: MainViewModel, startVideoId: Long) {
 
     LaunchedEffect(mirror, playerView) { playerView?.videoSurfaceView?.scaleX = if (mirror) -1f else 1f }
 
+    LaunchedEffect(player) {
+        PlaybackGate.pause.collect {
+            if (player.isPlaying || player.playWhenReady) { player.pause(); saveProgress() }
+        }
+    }
+
     // Başka ekrana / uygulamaya geçince duraklat; geri gelince kullanıcı dokunana kadar bekle
     DisposableEffect(lifecycleOwner) {
         val obs = androidx.lifecycle.LifecycleEventObserver { _, event ->
             when (event) {
-                androidx.lifecycle.Lifecycle.Event.ON_STOP -> {
+                androidx.lifecycle.Lifecycle.Event.ON_PAUSE, androidx.lifecycle.Lifecycle.Event.ON_STOP -> {
                     if (player.isPlaying || player.playWhenReady) {
                         player.pause()
                         saveProgress()
                     }
                 }
-                androidx.lifecycle.Lifecycle.Event.ON_START -> {
+                androidx.lifecycle.Lifecycle.Event.ON_RESUME -> {
                     controlsVisible = true
                     if (fileMissing || loadedId > 0) reloadKey++ // dosya bu arada silinmiş/yeniden bağlanmış olabilir
                 }

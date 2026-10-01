@@ -59,11 +59,13 @@ class ArchiveRepository(private val context: Context) {
     suspend fun restoreTurku(id: Long) = turkuDao.restore(id)
     suspend fun reorderTurkus(ordered: List<Turku>) = ordered.forEachIndexed { i, t -> turkuDao.setOrder(t.id, i) }
 
-    /** [deleteGalleryFiles]=false ise galerideki videolar telefonda kalır, sadece arşivden çıkar. */
-    suspend fun deleteTurkuForever(id: Long, deleteGalleryFiles: Boolean = false) {
-        for (v in videoDao.allVideosForTurkuSync(id)) removeVideoFiles(v, deleteGalleryFiles)
+    /** Türküyü ve videolarının dosyalarını siler. Silinemeyen (izin gereken) dosyaların adreslerini döner. */
+    suspend fun deleteTurkuForever(id: Long, deleteGalleryFiles: Boolean = true): List<String> {
+        val failed = mutableListOf<String>()
+        for (v in videoDao.allVideosForTurkuSync(id)) if (!removeVideoFiles(v, deleteGalleryFiles)) failed += v.localPath
         for (d in docDao.allDocsForTurkuSync(id)) FileManager.delete(d.localPath)
         turkuDao.deleteForever(id)
+        return failed
     }
 
     // ---------------- Video
@@ -85,15 +87,18 @@ class ArchiveRepository(private val context: Context) {
         videoDao.setOrderTag(id, clean, num)
     }
 
-    suspend fun deleteVideoForever(v: VideoItem, deleteGalleryFile: Boolean = false) {
-        removeVideoFiles(v, deleteGalleryFile)
+    /** Videoyu arşivden ve telefondan siler. Dosya izin gerektiği için silinemediyse false döner. */
+    suspend fun deleteVideoForever(v: VideoItem, deleteGalleryFile: Boolean = true): Boolean = withContext(Dispatchers.IO) {
+        val ok = removeVideoFiles(v, deleteGalleryFile)
         videoDao.deleteForever(v.id)
+        ok
     }
 
-    private fun removeVideoFiles(v: VideoItem, deleteGalleryFile: Boolean) {
+    private fun removeVideoFiles(v: VideoItem, deleteFile: Boolean): Boolean {
         FileManager.delete(v.thumbnailPath)
-        if (!VideoStore.isContent(v.localPath) || deleteGalleryFile) VideoStore.delete(context, v.localPath)
-        else VideoStore.ignore(context, v.localPath) // telefonda kalsın ama klasör taramasında geri gelmesin
+        if (!deleteFile) return true
+        // Aynı dosyayı kullanan başka kayıt varsa dosyayı silme
+        return VideoStore.delete(context, v.localPath)
     }
 
     data class ImportResult(val id: Long, val duplicateOf: String?, val source: Pair<String, Long>? = null)
@@ -111,11 +116,21 @@ class ArchiveRepository(private val context: Context) {
         val turkuName = turkuDao.turkuByIdSync(turkuId)?.name
         // Zaten Bağlama Arşivi klasöründe duruyorsa yeniden kopyalama, yerindekine bağla
         val existing = VideoStore.findInArchiveFolder(context, uri)
-        val saved = if (existing != null) {
-            VideoStore.mediaId(existing.toString())?.let { VideoStore.unignore(context, it) }
-            VideoStore.Saved(existing.toString(), source?.second ?: 0L, "")
-        } else VideoStore.save(context, uri, fileName, turkuName)
-        val linked = existing != null
+        // Orijinal dosya (ör. WhatsApp klasöründe) galeride bulunabiliyorsa:
+        //  - "Tüm dosyalara erişim" varsa Bağlama Arşivi klasörüne TAŞI (tek kopya)
+        //  - yoksa kopyalama, orijinaline bağlan (yine tek kopya)
+        val originalUri = if (existing == null && source != null) VideoStore.findOriginal(context, source.first, source.second) else null
+        val moved = if (originalUri != null) VideoStore.moveIntoArchive(context, originalUri, fileName, turkuName) else null
+        val saved = when {
+            existing != null -> {
+                VideoStore.mediaId(existing.toString())?.let { VideoStore.unignore(context, it) }
+                VideoStore.Saved(existing.toString(), source?.second ?: 0L, "")
+            }
+            moved != null -> moved
+            originalUri != null -> VideoStore.Saved(originalUri.toString(), source?.second ?: 0L, "")
+            else -> VideoStore.save(context, uri, fileName, turkuName)
+        }
+        val linked = saved.hash.isEmpty()
         val (dur, thumb) = VideoStore.meta(context, saved.path)
         val dup = if (linked) videoDao.allSync().firstOrNull { !it.isDeleted && VideoStore.mediaId(it.localPath) == VideoStore.mediaId(saved.path) }
             else videoDao.findByHash(saved.hash)
@@ -139,46 +154,34 @@ class ArchiveRepository(private val context: Context) {
                 uploadOrder = uploadOrder
             )
         )
-        ImportResult(id, dup?.title, if (linked) null else source)
+        ImportResult(id, dup?.title, null)
     }
 
     /**
-     * Movies/Bağlama Arşivi klasörünü tarar: oraya elle konan yeni videoları (alt klasör adı = türkü adı)
-     * kopyalamadan arşive ekler. Eklenen video sayısını döner.
+     * Telefondan (galeriden / dosya yöneticisinden) silinen videoları arşivden de kaldırır.
+     * Güvenlik: okuma izni yoksa veya galerideki videoların hepsi birden "yok" görünüyorsa (izin/hafıza kartı sorunu) dokunmaz.
      */
-    suspend fun syncArchiveFolder(): Int = withContext(Dispatchers.IO) {
-        if (!VideoStore.galleryEnabled) return@withContext 0
-        val found = VideoStore.scanArchiveFolder(context)
-        if (found.isEmpty()) return@withContext 0
-        val known = videoDao.allSync().mapNotNull { VideoStore.mediaId(it.localPath) }.toSet()
-        val ignored = VideoStore.ignored(context)
-        val fresh = found.filter { it.id !in known && it.id !in ignored }
-        if (fresh.isEmpty()) return@withContext 0
-        val turkus = turkuDao.allSync().toMutableList()
-        var added = 0
-        for (fv in fresh) {
-            val folder = fv.subFolder.ifBlank { "Genel" }
-            val match = turkus.firstOrNull { !it.isDeleted && Tr.norm(VideoStore.folderName(it.name)) == Tr.norm(folder) }
-                ?: turkus.firstOrNull { it.isDeleted && Tr.norm(VideoStore.folderName(it.name)) == Tr.norm(folder) }?.also { turkuDao.restore(it.id) }
-            val turkuId = match?.id ?: turkuDao.insert(Turku(name = folder, manualOrder = turkus.size + added)).also {
-                // yeni oluşan türküyü listeye ekle ki aynı klasördeki diğer videolar da buna gitsin
-                turkus.add(Turku(id = it, name = folder))
-            }
-            val (dur, thumb) = VideoStore.meta(context, fv.uri.toString())
-            videoDao.insert(
-                VideoItem(
-                    turkuId = turkuId,
-                    title = fv.name.substringBeforeLast('.'),
-                    localPath = fv.uri.toString(),
-                    durationMs = dur,
-                    lessonDate = Tr.today(),
-                    thumbnailPath = thumb,
-                    fileSize = fv.size
-                )
-            )
-            added++
+    suspend fun removeVideosDeletedFromPhone(): Int = withContext(Dispatchers.IO) {
+        if (!VideoStore.galleryEnabled || !VideoStore.hasReadPermission(context)) return@withContext 0
+        val gallery = videoDao.allSync().filter { VideoStore.isContent(it.localPath) || it.localPath.startsWith("/storage/") }
+        if (gallery.isEmpty()) return@withContext 0
+        val missing = gallery.filter { !VideoStore.exists(context, it.localPath) }
+        if (missing.isEmpty() || (missing.size == gallery.size && gallery.size > 1)) return@withContext 0
+        missing.forEach { v -> FileManager.delete(v.thumbnailPath); videoDao.deleteForever(v.id) }
+        missing.size
+    }
+
+    /** Bağlama Arşivi klasöründeki videolarının, galeride (WhatsApp vb.) kalan ikinci kopyaları. */
+    suspend fun findDuplicateCopies(): List<Uri> = withContext(Dispatchers.IO) {
+        if (!VideoStore.galleryEnabled || !VideoStore.hasReadPermission(context)) return@withContext emptyList()
+        val out = mutableListOf<Uri>()
+        for (v in videoDao.allSync()) {
+            if (!VideoStore.isInArchiveFolder(context, v.localPath)) continue
+            val size = if (v.fileSize > 0) v.fileSize else continue
+            // Uygulama dosya adını değiştirdiği için bayt boyutuyla eşleştir (aynı boyutta iki farklı video pratikte olmaz)
+            out += VideoStore.findOutsideArchiveBySize(context, size)
         }
-        added
+        out.distinct()
     }
 
     /** Dosyası silinmiş bir videoyu yeni seçilen dosyaya bağlar (klasördeyse kopyalamaz). */
@@ -267,9 +270,9 @@ class ArchiveRepository(private val context: Context) {
     /** 30 günden eski silinenleri kalıcı olarak temizler. */
     suspend fun purgeOldTrash(days: Int = 30) = withContext(Dispatchers.IO) {
         val before = System.currentTimeMillis() - days * 24L * 3600 * 1000
-        videoDao.expiredDeleted(before).forEach { deleteVideoForever(it, deleteGalleryFile = false) }
+        videoDao.expiredDeleted(before).forEach { deleteVideoForever(it) }
         docDao.expiredDeleted(before).forEach { deleteDocForever(it) }
-        turkuDao.expiredDeleted(before).forEach { deleteTurkuForever(it.id, deleteGalleryFiles = false) }
+        turkuDao.expiredDeleted(before).forEach { deleteTurkuForever(it.id) }
     }
 
     /** Küçük resmi veya süresi eksik videoları tamamlar (eski arşivden gelenler için). */

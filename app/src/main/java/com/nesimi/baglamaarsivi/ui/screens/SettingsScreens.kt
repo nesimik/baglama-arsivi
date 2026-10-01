@@ -216,10 +216,10 @@ fun StorageScreen(vm: MainViewModel) {
                         Spacer(Modifier.height(8.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             OutlinedButton(onClick = { vm.clearCache() }) { Text("Önbelleği temizle") }
-                            if (com.nesimi.baglamaarsivi.util.VideoStore.galleryEnabled) OutlinedButton(onClick = { vm.syncFolder(force = true) }) { Text("Klasörü tara") }
+                            if (com.nesimi.baglamaarsivi.util.VideoStore.galleryEnabled) OutlinedButton(onClick = { vm.syncFolder(force = true) }) { Text("Çift kopyaları bul") }
                         }
                         if (com.nesimi.baglamaarsivi.util.VideoStore.galleryEnabled) Text(
-                            "Movies/Bağlama Arşivi/<türkü adı> klasörüne kendin koyduğun videolar uygulama açılınca otomatik eklenir (alt klasör adı = türkü adı).",
+                            "Videolar telefonda Movies/Bağlama Arşivi/<türkü adı> klasöründe. Uygulamadan silinen video oradan da silinir; oradan silinen video uygulamadan da kalkar.",
                             fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp)
                         )
                     }
@@ -281,9 +281,9 @@ fun TrashScreen(vm: MainViewModel) {
             }
         }
     }
-    if (confirmEmpty) DeleteWithFileDialog("Çöp kutusu boşaltılsın mı?", "Silinenler arşivden kalıcı olarak çıkarılır.", "Boşalt", { vm.emptyTrash(it) }, { confirmEmpty = false })
-    confirmT?.let { t -> DeleteWithFileDialog("Kalıcı silinsin mi?", "“${t.name}” ve videoları arşivden kalıcı olarak çıkarılır.", "Kalıcı Sil", { vm.deleteTurkuForever(t.id, it) }, { confirmT = null }) }
-    confirmV?.let { v -> DeleteWithFileDialog("Kalıcı silinsin mi?", "“${v.title}” arşivden kalıcı olarak çıkarılır.", "Kalıcı Sil", { vm.deleteVideoForever(v, it) }, { confirmV = null }) }
+    if (confirmEmpty) ConfirmDialog("Çöp kutusu boşaltılsın mı?", "Silinenler ve video dosyaları telefondan da kalıcı olarak silinir.", "Boşalt", { vm.emptyTrash() }, { confirmEmpty = false })
+    confirmT?.let { t -> ConfirmDialog("Kalıcı silinsin mi?", "“${t.name}” ve videoları telefondan da kalıcı olarak silinir.", "Kalıcı Sil", { vm.deleteTurkuForever(t.id) }, { confirmT = null }) }
+    confirmV?.let { v -> ConfirmDialog("Kalıcı silinsin mi?", "“${v.title}” telefondan da kalıcı olarak silinir.", "Kalıcı Sil", { vm.deleteVideoForever(v) }, { confirmV = null }) }
     confirmD?.let { d -> ConfirmDialog("Kalıcı silinsin mi?", "“${d.title}” dosyasıyla birlikte silinir.", "Kalıcı Sil", { vm.deleteDocForever(d) }, { confirmD = null }) }
 }
 
@@ -302,25 +302,3 @@ private fun TrashRow(title: String, sub: String, onRestore: () -> Unit, onDelete
 }
 
 
-/** Kalıcı silmede "videoyu telefondan da sil" seçeneği sunar (varsayılan: telefonda kalsın). */
-@Composable
-private fun DeleteWithFileDialog(title: String, text: String, confirm: String, onConfirm: (Boolean) -> Unit, onDismiss: () -> Unit) {
-    var alsoFile by remember { mutableStateOf(false) }
-    androidx.compose.material3.AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(title) },
-        text = {
-            Column {
-                Text(text)
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp)) {
-                    androidx.compose.material3.Checkbox(checked = alsoFile, onCheckedChange = { alsoFile = it })
-                    Text("Video dosyalarını telefondan (galeriden) de sil", fontSize = 14.sp)
-                }
-                Text(if (alsoFile) "⚠️ Videolar telefondan da silinecek." else "Videolar telefonun Filmler/Bağlama Arşivi klasöründe kalacak.",
-                    fontSize = 12.sp, color = if (alsoFile) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-        },
-        confirmButton = { TextButton(onClick = { onConfirm(alsoFile); onDismiss() }) { Text(confirm, color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold) } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Vazgeç") } }
-    )
-}
