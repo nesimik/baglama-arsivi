@@ -1,0 +1,47 @@
+name: APK Oluştur
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  derle:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: APK derle
+        run: |
+          chmod +x ./gradlew
+          ./gradlew assembleRelease --no-daemon --stacktrace
+
+      - name: APK adını düzenle
+        run: |
+          mkdir -p cikti
+          cp app/build/outputs/apk/release/app-release.apk "cikti/BaglamaArsivi-v2.0.${{ github.run_number }}.apk"
+
+      - name: APK'yı yükle
+        uses: actions/upload-artifact@v4
+        with:
+          name: BaglamaArsivi-v2.0.${{ github.run_number }}
+          path: cikti/*.apk
+          if-no-files-found: error
+
+      - name: Sürüm sayfasına koy (telefondan kolay indirme)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v2.0.${{ github.run_number }}
+          name: Bağlama Arşivi v2.0.${{ github.run_number }}
+          files: cikti/*.apk
+          make_latest: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
