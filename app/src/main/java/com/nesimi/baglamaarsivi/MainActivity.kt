@@ -50,7 +50,6 @@ import com.nesimi.baglamaarsivi.ui.screens.DocumentsScreen
 import com.nesimi.baglamaarsivi.ui.screens.FavoritesScreen
 import com.nesimi.baglamaarsivi.ui.screens.HomeScreen
 import com.nesimi.baglamaarsivi.ui.screens.ImportScreen
-import com.nesimi.baglamaarsivi.ui.screens.MigrationScreen
 import com.nesimi.baglamaarsivi.ui.screens.PlayerScreen
 import com.nesimi.baglamaarsivi.ui.screens.PracticeScreen
 import com.nesimi.baglamaarsivi.ui.screens.SearchScreen
@@ -204,7 +203,6 @@ private fun AppRoot(vm: MainViewModel) {
                     Screen.Trash -> TrashScreen(vm)
                     Screen.Storage -> StorageScreen(vm)
                     Screen.Search -> SearchScreen(vm)
-                    Screen.Migration -> MigrationScreen(vm)
                     is Screen.TurkuDetail -> TurkuDetailScreen(vm, screen.turkuId)
                     is Screen.Player -> PlayerScreen(vm, screen.videoId)
                     is Screen.Import -> ImportScreen(vm, screen)

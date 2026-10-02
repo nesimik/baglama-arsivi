@@ -50,7 +50,6 @@ sealed class Screen {
     data object Trash : Screen()
     data object Storage : Screen()
     data object Search : Screen()
-    data object Migration : Screen()
     data class TurkuDetail(val turkuId: Long) : Screen()
     data class Player(val videoId: Long) : Screen()
     data class Import(
@@ -419,7 +418,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             val n = runCatching { repo.removeVideosDeletedFromPhone() }.getOrDefault(0)
             if (n > 0) { toast("🗑️ Telefondan silinen $n video arşivden de kaldırıldı"); refreshStorage() }
             com.nesimi.baglamaarsivi.util.VideoStore.checkTick.value++
-            if (!dupChecked || force) {
+            if (force) {
                 dupChecked = true
                 val c = runCatching { repo.removeOwnCopies() }.getOrDefault(0)
                 if (c > 0) { toast("🧹 $c videonun fazladan kopyası silindi; videolar artık asıl yerinden oynatılıyor"); refreshStorage(); refreshInternalVideos() }

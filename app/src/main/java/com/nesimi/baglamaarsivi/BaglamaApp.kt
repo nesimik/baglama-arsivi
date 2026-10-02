@@ -13,6 +13,35 @@ class BaglamaApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        if (isMainProcess()) safetyCopyOnUpdate()
+    }
+
+    private fun isMainProcess(): Boolean =
+        if (android.os.Build.VERSION.SDK_INT >= 28) getProcessName() == packageName else true
+
+    /**
+     * Güncelleme güvencesi: uygulamanın yeni sürümü ilk kez açıldığında, veritabanına dokunulmadan ÖNCE
+     * kopyası alınır (files/guvenlik). Bir sorun olursa veriler bu kopyadan kurtarılabilir.
+     * Son 3 kopya saklanır; videolar kopyalanmaz (sadece küçük veritabanı dosyası).
+     */
+    private fun safetyCopyOnUpdate() {
+        try {
+            val prefs = getSharedPreferences("surum", MODE_PRIVATE)
+            val current = BuildConfig.VERSION_CODE
+            val last = prefs.getInt("son_surum", -1)
+            if (last == current) return
+            val db = com.nesimi.baglamaarsivi.data.AppDatabase.databaseFile(this)
+            if (last != -1 && db.exists()) {
+                val dir = java.io.File(filesDir, "guvenlik/v${last}_${System.currentTimeMillis()}").apply { mkdirs() }
+                for (suffix in listOf("", "-wal", "-shm")) {
+                    val f = java.io.File(db.path + suffix)
+                    if (f.exists()) f.copyTo(java.io.File(dir, f.name), overwrite = true)
+                }
+                java.io.File(filesDir, "guvenlik").listFiles()?.sortedByDescending { it.lastModified() }?.drop(3)?.forEach { it.deleteRecursively() }
+            }
+            prefs.edit().putInt("son_surum", current).apply()
+        } catch (_: Exception) {
+        }
     }
 }
 

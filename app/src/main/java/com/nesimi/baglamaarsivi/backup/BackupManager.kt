@@ -157,7 +157,7 @@ object BackupManager {
                         }
                     }
                     isTar -> TarReader.read(counting, sink)
-                    else -> throw IllegalArgumentException("Bu dosya tanınmadı. Bağlama Arşivi yedeği (.zip) veya eski uygulama arşivi (.zip/.tar) seçin.")
+                    else -> throw IllegalArgumentException("Bu dosya tanınmadı. Bağlama Arşivi yedeği (.zip) seçin.")
                 }
             }
 

@@ -126,9 +126,6 @@ fun SettingsScreen(vm: MainViewModel) {
                         fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     TextButton(onClick = doBackup) { Text("Başka bir yere kaydet (Drive, SD kart…)") }
                 }
-                TextButton(onClick = { vm.navigate(Screen.Migration) }) {
-                    Icon(Icons.Default.CloudDownload, null); Spacer(Modifier.width(4.dp)); Text("Eski “Bağlama Arşivim” uygulamasından aktar")
-                }
             }
         }
 
@@ -155,43 +152,6 @@ fun SettingsScreen(vm: MainViewModel) {
         Text("Bağlama derslerinin videoları, notaları ve çalışma takibi için kişisel arşiv. Tüm veriler yalnızca telefonunda saklanır; internet gerektirmez.",
             fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.height(40.dp))
-    }
-}
-
-@Composable
-fun MigrationScreen(vm: MainViewModel) {
-    val (_, doRestore) = rememberBackupLaunchers(vm)
-    Column(Modifier.fillMaxSize()) {
-        BackTopBar("Eski verileri aktar", onBack = { vm.back() })
-        Column(Modifier.verticalScroll(rememberScrollState()).padding(16.dp)) {
-            Text("Eski “Bağlama Arşivim” uygulaması farklı bir imzayla kurulduğu için veriler kendiliğinden geçemez. " +
-                "Aşağıdaki yollardan biriyle bir kez aktarman yeterli; sonraki tüm güncellemeler verilerini koruyarak üstüne kurulur.",
-                fontSize = 14.sp)
-            Spacer(Modifier.height(12.dp))
-            StepCard("1. yol (önerilen) – AI Studio ile",
-                "AI Studio'da eski projeye “Tam Yedek Dışa Aktar” özelliğini ekle (GitHub'daki GECIS_REHBERI dosyasındaki hazır metni Gemini'ye yapıştır), " +
-                    "telefona kur, Ayarlar'dan yedeği al. Oluşan .zip dosyasını aşağıdaki butonla seç.")
-            StepCard("2. yol – Bilgisayar + USB kablo",
-                "Telefonda USB hata ayıklamayı aç, bilgisayarda şu komutu çalıştır:\n\nadb exec-out run-as com.aistudio.baglamaarsivim.zpkrv tar c databases files > eski_arsiv.tar\n\n" +
-                    "Oluşan eski_arsiv.tar dosyasını telefona kopyala ve aşağıdaki butonla seç.")
-            StepCard("3. yol – Videoları tek tek paylaş",
-                "WhatsApp'taki orijinal videolar hâlâ duruyorsa, onları WhatsApp'tan “Paylaş → Bağlama Arşivi” ile yeniden ekleyebilirsin.")
-            Spacer(Modifier.height(12.dp))
-            Button(onClick = doRestore, modifier = Modifier.fillMaxWidth().height(52.dp)) {
-                Icon(Icons.Default.Restore, null); Spacer(Modifier.width(6.dp)); Text("Yedek / eski arşiv dosyasını seç", fontWeight = FontWeight.Bold)
-            }
-            Text("Aktarım bitince eski uygulamayı kontrol edip silebilirsin.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp))
-        }
-    }
-}
-
-@Composable
-private fun StepCard(title: String, text: String) {
-    Card(Modifier.fillMaxWidth().padding(vertical = 4.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
-        Column(Modifier.padding(14.dp)) {
-            Text(title, fontWeight = FontWeight.Bold)
-            Text(text, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
     }
 }
 

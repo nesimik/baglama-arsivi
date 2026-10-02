@@ -160,14 +160,9 @@ fun HomeScreen(vm: MainViewModel) {
             item {
                 EmptyState(
                     Icons.Default.LibraryMusic, "Arşivin henüz boş",
-                    "WhatsApp'taki ders videolarını “Paylaş → Bağlama Arşivi” ile ekleyebilir ya da eski uygulamadaki verilerini aktarabilirsin."
+                    "WhatsApp'taki ders videolarını “Paylaş → Bağlama Arşivi” ile ekleyebilirsin."
                 ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Button(onClick = { vm.navigate(Screen.Migration) }) {
-                            Icon(Icons.Default.CloudDownload, null); Spacer(Modifier.width(6.dp)); Text("Eski uygulamadan aktar / Yedek yükle")
-                        }
-                        OutlinedButton(onClick = { showNew = true }) { Text("İlk türkünü oluştur") }
-                    }
+                    Button(onClick = { showNew = true }) { Text("İlk türkünü oluştur") }
                 }
             }
         }

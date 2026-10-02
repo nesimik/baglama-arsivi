@@ -26,5 +26,6 @@ otomatik artar. Bu yüzden yeni APK her zaman eskisinin **üstüne güncelleme o
 - **Tam yedekleme / geri yükleme:** tüm veritabanı + videolar + belgeler tek bir `.zip` dosyasına
 - Çöp kutusu (30 gün), depolama yönetimi, aydınlık / karanlık tema
 
-## Eski uygulamadan geçiş
-Bkz. [GECIS_REHBERI.md](GECIS_REHBERI.md)
+## Güncellemeler ve verilerin
+Yeni sürüm eskisinin üstüne kurulur; türküler, videolar, numaralar, işaretler ve çalışma kayıtları aynen kalır.
+Veritabanı değişiklikleri yalnızca ekleme yapar (hiçbir zaman silmez) ve her güncellemeden önce veritabanının güvenlik kopyası alınır.
