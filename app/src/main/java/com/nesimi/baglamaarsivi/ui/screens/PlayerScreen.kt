@@ -9,6 +9,11 @@ import androidx.annotation.OptIn
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.material.icons.filled.LibraryMusic
+import com.nesimi.baglamaarsivi.ui.components.NotesPanel
+import com.nesimi.baglamaarsivi.ui.components.isViewableNote
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -184,6 +189,16 @@ fun PlayerScreen(vm: MainViewModel, startVideoId: Long) {
     var orderDialog by remember { mutableStateOf(false) }
     var editDialog by remember { mutableStateOf(false) }
     var playerView by remember { mutableStateOf<PlayerView?>(null) }
+
+    // Nota paneli
+    val allDocs by remember(turkuId) { vm.docsFor(turkuId) }.collectAsState(initial = emptyList())
+    val noteDocs = remember(allDocs) { allDocs.sortedByDescending { it.isViewableNote() } }
+    var noteDocId by remember { mutableStateOf<Long?>(null) }
+    var notesOpen by remember { mutableStateOf(false) }
+    var notesMax by remember { mutableStateOf(false) }
+    var notesLeft by remember { mutableStateOf(vm.notesLeft) }
+    var notesFrac by remember { mutableFloatStateOf(0.45f) }
+    var notesFracP by remember { mutableFloatStateOf(0.5f) }
 
     val currentIndex = playlist.indexOfFirst { it.id == videoId }
     val next = playlist.getOrNull(currentIndex + 1)
@@ -435,6 +450,9 @@ fun PlayerScreen(vm: MainViewModel, startVideoId: Long) {
                     Row(Modifier.fillMaxWidth().align(Alignment.TopStart), verticalAlignment = Alignment.CenterVertically) {
                         IconButton(onClick = { if (fullscreen) lockedTo = 1 else vm.back() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Geri", tint = Color.White) }
                         Text(v?.title ?: "", color = Color.White, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                        IconButton(onClick = { notesOpen = !notesOpen; if (!notesOpen) notesMax = false; poke() }) {
+                            Icon(Icons.Default.LibraryMusic, "Nota", tint = if (notesOpen) FavGold else Color.White)
+                        }
                         IconButton(onClick = { mirror = !mirror; poke() }) { Icon(Icons.Default.Flip, "Ayna", tint = if (mirror) FavGold else Color.White) }
                         IconButton(onClick = { lockedTo = if (fullscreen) 1 else 2; poke() }) {
                             Icon(if (fullscreen) Icons.Default.FullscreenExit else Icons.Default.Fullscreen, "Tam ekran", tint = Color.White)
@@ -480,132 +498,201 @@ fun PlayerScreen(vm: MainViewModel, startVideoId: Long) {
         }
     }
 
+    // ---------------------------------------------------------------- Nota paneli
+    val notesPanel: @Composable (Modifier, (() -> Unit)?) -> Unit = { mod, swap ->
+        NotesPanel(
+            docs = noteDocs,
+            selectedId = noteDocId,
+            onSelect = { noteDocId = it },
+            maximized = notesMax,
+            onToggleMaximize = { notesMax = !notesMax },
+            onClose = { notesOpen = false; notesMax = false },
+            onAddNote = { vm.navigate(Screen.Import(isVideo = false, turkuId = turkuId)) },
+            onOpenExternal = { openDoc(context, vm, it) },
+            modifier = mod,
+            onSwapSide = swap
+        )
+    }
+
     if (fullscreen) {
-        videoBox(Modifier.fillMaxSize())
-    } else {
-        Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-            // Dikey modda video durum çubuğunun altına girmesin: üstte siyah şerit + saat/pil görünür
-            Box(Modifier.fillMaxWidth().background(Color.Black).statusBarsPadding()) {
-                videoBox(Modifier.fillMaxWidth().aspectRatio(16f / 9f))
+        when {
+            notesOpen && notesMax -> notesPanel(Modifier.fillMaxSize(), { notesLeft = !notesLeft; vm.notesLeft = notesLeft })
+            notesOpen -> BoxWithConstraints(Modifier.fillMaxSize().background(Color.Black)) {
+                val totalW = constraints.maxWidth.toFloat().coerceAtLeast(1f)
+                val swap: () -> Unit = { notesLeft = !notesLeft; vm.notesLeft = notesLeft }
+                val divider: @Composable () -> Unit = {
+                    Box(
+                        Modifier.width(14.dp).fillMaxHeight().background(Color(0xFF2A2420))
+                            .pointerInput(notesLeft) {
+                                detectHorizontalDragGestures { change, dx ->
+                                    change.consume()
+                                    notesFrac = (notesFrac + (if (notesLeft) dx else -dx) / totalW).coerceIn(0.25f, 0.75f)
+                                }
+                            },
+                        contentAlignment = Alignment.Center
+                    ) { Box(Modifier.width(4.dp).height(40.dp).background(Color.White.copy(alpha = 0.6f), RoundedCornerShape(2.dp))) }
+                }
+                Row(Modifier.fillMaxSize()) {
+                    if (notesLeft) { notesPanel(Modifier.fillMaxHeight().weight(notesFrac), swap); divider() }
+                    videoBox(Modifier.fillMaxHeight().weight(1f - notesFrac))
+                    if (!notesLeft) { divider(); notesPanel(Modifier.fillMaxHeight().weight(notesFrac), swap) }
+                }
             }
-            LazyColumn(contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                // Başlık
-                item {
-                    Row(verticalAlignment = Alignment.Top) {
-                        Column(Modifier.weight(1f)) {
-                            Text(v?.title ?: "", fontWeight = FontWeight.Bold, fontSize = 17.sp)
-                            val info = listOfNotNull(
-                                v?.displayOrderTag?.takeIf { it.isNotBlank() }?.let { "#$it" },
-                                v?.lessonDate?.takeIf { it.isNotBlank() }?.let { "📅 $it" },
-                                v?.instructor?.takeIf { it.isNotBlank() }?.let { "👤 $it" },
-                                v?.fileSize?.takeIf { it > 0 }?.let { Tr.size(it) }
-                            ).joinToString("  ")
-                            Text(info, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            if (turkuName != null) {
-                                Text("🎵 $turkuName →", fontSize = 13.sp, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold,
-                                    modifier = Modifier.padding(top = 2.dp).pointerInput(turkuId) { detectTapGestures { vm.navigate(Screen.TurkuDetail(turkuId)) } })
-                            }
-                        }
-                        if (v != null) {
-                            IconButton(onClick = { vm.toggleVideoFavorite(v) }) {
-                                Icon(if (v.isFavorite) Icons.Default.Star else Icons.Outlined.StarBorder, "Favori", tint = if (v.isFavorite) FavGold else MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
-                            IconButton(onClick = { editDialog = true }) { Icon(Icons.Default.Edit, "Düzenle") }
-                        }
+            else -> videoBox(Modifier.fillMaxSize())
+        }
+    } else if (notesOpen && notesMax) {
+        Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).statusBarsPadding()) {
+            notesPanel(Modifier.fillMaxSize(), null)
+        }
+    } else {
+        BoxWithConstraints(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+            val totalH = constraints.maxHeight.toFloat().coerceAtLeast(1f)
+            Column(Modifier.fillMaxSize()) {
+                // Dikey modda video durum çubuğunun altına girmesin: üstte siyah şerit + saat/pil görünür
+                if (notesOpen) {
+                    Box(Modifier.fillMaxWidth().weight(1f - notesFracP).background(Color.Black).statusBarsPadding()) {
+                        videoBox(Modifier.fillMaxSize())
                     }
-                }
-                // Hız
-                item {
-                    Text("Çalışma hızı (ses perdesi korunur)", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        items(SPEEDS) { s -> FilterChip(selected = s == speed, onClick = { setSpeed(s) }, label = { Text(speedLabel(s)) }) }
+                    Box(
+                        Modifier.fillMaxWidth().height(16.dp).background(MaterialTheme.colorScheme.surfaceVariant)
+                            .pointerInput(Unit) {
+                                detectVerticalDragGestures { change, dy ->
+                                    change.consume()
+                                    notesFracP = (notesFracP - dy / totalH).coerceIn(0.25f, 0.8f)
+                                }
+                            },
+                        contentAlignment = Alignment.Center
+                    ) { Box(Modifier.width(44.dp).height(4.dp).background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f), RoundedCornerShape(2.dp))) }
+                    notesPanel(Modifier.fillMaxWidth().weight(notesFracP), null)
+                } else {
+                    Box(Modifier.fillMaxWidth().background(Color.Black).statusBarsPadding()) {
+                        videoBox(Modifier.fillMaxWidth().aspectRatio(16f / 9f))
                     }
-                }
-                // A-B döngü
-                item {
-                    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
-                        Column(Modifier.padding(10.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Default.Repeat, null, tint = MaterialTheme.colorScheme.primary)
-                                Spacer(Modifier.width(6.dp))
-                                Text("Bölüm tekrarı (A-B)", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-                                Switch(checked = loopOn, enabled = loopA >= 0 && loopB > loopA, onCheckedChange = {
-                                    loopOn = it; loopCount = 0
-                                    if (it) player.seekTo(loopA)
-                                })
-                            }
-                            Text("Zor bir pasajı sürekli tekrarlat: başlangıçta A'ya, bitişte B'ye bas.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) {
-                                Text("Tekrar arası bekle:", fontSize = 12.sp, modifier = Modifier.padding(end = 6.dp))
-                                listOf(0, 2, 4, 8).forEach { g ->
-                                    FilterChip(selected = loopGap == g, onClick = { loopGap = g; vm.loopGapSec = g },
-                                        label = { Text(if (g == 0) "Yok" else "$g sn", fontSize = 12.sp) }, modifier = Modifier.padding(end = 4.dp))
+                LazyColumn(contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    // Başlık
+                    item {
+                        Row(verticalAlignment = Alignment.Top) {
+                            Column(Modifier.weight(1f)) {
+                                Text(v?.title ?: "", fontWeight = FontWeight.Bold, fontSize = 17.sp)
+                                val info = listOfNotNull(
+                                    v?.displayOrderTag?.takeIf { it.isNotBlank() }?.let { "#$it" },
+                                    v?.lessonDate?.takeIf { it.isNotBlank() }?.let { "📅 $it" },
+                                    v?.instructor?.takeIf { it.isNotBlank() }?.let { "👤 $it" },
+                                    v?.fileSize?.takeIf { it > 0 }?.let { Tr.size(it) }
+                                ).joinToString("  ")
+                                Text(info, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                androidx.compose.material3.FilledTonalButton(
+                                    onClick = { notesOpen = true },
+                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp),
+                                    modifier = Modifier.padding(top = 4.dp).height(34.dp)
+                                ) { Text(if (noteDocs.isEmpty()) "🎼 Nota ekle / göster" else "🎼 Notayı göster (${noteDocs.size})", fontSize = 13.sp) }
+                                if (turkuName != null) {
+                                    Text("🎵 $turkuName →", fontSize = 13.sp, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold,
+                                        modifier = Modifier.padding(top = 2.dp).pointerInput(turkuId) { detectTapGestures { vm.navigate(Screen.TurkuDetail(turkuId)) } })
                                 }
                             }
-                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 6.dp)) {
-                                AssistChip(onClick = { loopA = player.currentPosition; if (loopB in 0..loopA) loopB = -1 }, label = { Text(if (loopA >= 0) "A: ${Tr.duration(loopA)}" else "A noktası") })
-                                AssistChip(onClick = {
-                                    val p = player.currentPosition
-                                    if (loopA in 0 until p) { loopB = p; loopOn = true; loopCount = 0; player.seekTo(loopA) } else vm.toast("Önce A noktasını seç")
-                                }, label = { Text(if (loopB >= 0) "B: ${Tr.duration(loopB)}" else "B noktası") })
-                                if (loopA >= 0) AssistChip(onClick = { loopA = -1; loopB = -1; loopOn = false }, label = { Text("Temizle") })
+                            if (v != null) {
+                                IconButton(onClick = { vm.toggleVideoFavorite(v) }) {
+                                    Icon(if (v.isFavorite) Icons.Default.Star else Icons.Outlined.StarBorder, "Favori", tint = if (v.isFavorite) FavGold else MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                                IconButton(onClick = { editDialog = true }) { Icon(Icons.Default.Edit, "Düzenle") }
                             }
-                            if (loopA >= 0 && loopB > loopA) {
-                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    AssistChip(onClick = { loopA = (loopA - 1000).coerceAtLeast(0) }, label = { Text("A −1sn") })
-                                    AssistChip(onClick = { loopA = (loopA + 1000).coerceAtMost(loopB - 500) }, label = { Text("A +1sn") })
-                                    AssistChip(onClick = { loopB = (loopB - 1000).coerceAtLeast(loopA + 500) }, label = { Text("B −1sn") })
-                                    AssistChip(onClick = { loopB = (loopB + 1000).coerceAtMost(duration) }, label = { Text("B +1sn") })
+                        }
+                    }
+                    // Hız
+                    item {
+                        Text("Çalışma hızı (ses perdesi korunur)", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            items(SPEEDS) { s -> FilterChip(selected = s == speed, onClick = { setSpeed(s) }, label = { Text(speedLabel(s)) }) }
+                        }
+                    }
+                    // A-B döngü
+                    item {
+                        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+                            Column(Modifier.padding(10.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.Repeat, null, tint = MaterialTheme.colorScheme.primary)
+                                    Spacer(Modifier.width(6.dp))
+                                    Text("Bölüm tekrarı (A-B)", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                                    Switch(checked = loopOn, enabled = loopA >= 0 && loopB > loopA, onCheckedChange = {
+                                        loopOn = it; loopCount = 0
+                                        if (it) player.seekTo(loopA)
+                                    })
+                                }
+                                Text("Zor bir pasajı sürekli tekrarlat: başlangıçta A'ya, bitişte B'ye bas.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) {
+                                    Text("Tekrar arası bekle:", fontSize = 12.sp, modifier = Modifier.padding(end = 6.dp))
+                                    listOf(0, 2, 4, 8).forEach { g ->
+                                        FilterChip(selected = loopGap == g, onClick = { loopGap = g; vm.loopGapSec = g },
+                                            label = { Text(if (g == 0) "Yok" else "$g sn", fontSize = 12.sp) }, modifier = Modifier.padding(end = 4.dp))
+                                    }
+                                }
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 6.dp)) {
+                                    AssistChip(onClick = { loopA = player.currentPosition; if (loopB in 0..loopA) loopB = -1 }, label = { Text(if (loopA >= 0) "A: ${Tr.duration(loopA)}" else "A noktası") })
+                                    AssistChip(onClick = {
+                                        val p = player.currentPosition
+                                        if (loopA in 0 until p) { loopB = p; loopOn = true; loopCount = 0; player.seekTo(loopA) } else vm.toast("Önce A noktasını seç")
+                                    }, label = { Text(if (loopB >= 0) "B: ${Tr.duration(loopB)}" else "B noktası") })
+                                    if (loopA >= 0) AssistChip(onClick = { loopA = -1; loopB = -1; loopOn = false }, label = { Text("Temizle") })
+                                }
+                                if (loopA >= 0 && loopB > loopA) {
+                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        AssistChip(onClick = { loopA = (loopA - 1000).coerceAtLeast(0) }, label = { Text("A −1sn") })
+                                        AssistChip(onClick = { loopA = (loopA + 1000).coerceAtMost(loopB - 500) }, label = { Text("A +1sn") })
+                                        AssistChip(onClick = { loopB = (loopB - 1000).coerceAtLeast(loopA + 500) }, label = { Text("B −1sn") })
+                                        AssistChip(onClick = { loopB = (loopB + 1000).coerceAtMost(duration) }, label = { Text("B +1sn") })
+                                    }
                                 }
                             }
                         }
                     }
-                }
-                // İşaretler
-                item {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("📌 İşaretler (${markers.size})", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-                        TextButton(onClick = { addMarkerAt = player.currentPosition }) {
-                            Icon(Icons.Default.BookmarkAdd, null); Spacer(Modifier.width(4.dp)); Text("Buraya işaret koy")
-                        }
-                    }
-                }
-                items(markers, key = { "m" + it.id }) { m ->
-                    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
-                        Row(Modifier.padding(start = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text(Tr.duration(m.positionMs), fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.pointerInput(m.id) { detectTapGestures { player.seekTo(m.positionMs); player.play() } })
-                            Spacer(Modifier.width(10.dp))
-                            Text(m.label, modifier = Modifier.weight(1f).pointerInput(m.id) { detectTapGestures { player.seekTo(m.positionMs); player.play() } }, maxLines = 2)
-                            TextButton(onClick = { loopA = m.positionMs; if (loopB in 0..loopA) loopB = -1 }) { Text("A") }
-                            IconButton(onClick = { markerDialog = m }) { Icon(Icons.Default.Edit, "Düzenle") }
-                            IconButton(onClick = { vm.deleteMarker(m.id) }) { Icon(Icons.Default.Delete, "Sil") }
-                        }
-                    }
-                }
-                if (v != null && (v.description.isNotBlank() || v.tags.isNotBlank())) {
+                    // İşaretler
                     item {
-                        Text("Açıklama", fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 6.dp))
-                        if (v.description.isNotBlank()) Text(v.description, fontSize = 14.sp)
-                        if (v.tags.isNotBlank()) Text(Tr.splitTags(v.tags).joinToString("  ") { "#$it" }, fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
-                    }
-                }
-                // Sıradaki videolar
-                if (playlist.size > 1) {
-                    item {
-                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp)) {
-                            Text("🎬 Bu türkünün videoları (${currentIndex + 1}/${playlist.size})", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-                            Text("Otomatik geç", fontSize = 12.sp)
-                            Switch(checked = autoNext, onCheckedChange = { autoNext = it }, modifier = Modifier.padding(start = 4.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("📌 İşaretler (${markers.size})", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                            TextButton(onClick = { addMarkerAt = player.currentPosition }) {
+                                Icon(Icons.Default.BookmarkAdd, null); Spacer(Modifier.width(4.dp)); Text("Buraya işaret koy")
+                            }
                         }
                     }
-                    items(playlist, key = { "p" + it.id }) { pv ->
-                        VideoCard(pv, onClick = { if (pv.id != videoId) switchTo(pv) }, isPlaying = pv.id == videoId,
-                            modifier = Modifier.animateItem(),
-                            onOrderChange = { vm.setVideoOrderTag(pv.id, it) }, orderSuggestion = nextOrderSuggestion(playlist))
+                    items(markers, key = { "m" + it.id }) { m ->
+                        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+                            Row(Modifier.padding(start = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Text(Tr.duration(m.positionMs), fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.pointerInput(m.id) { detectTapGestures { player.seekTo(m.positionMs); player.play() } })
+                                Spacer(Modifier.width(10.dp))
+                                Text(m.label, modifier = Modifier.weight(1f).pointerInput(m.id) { detectTapGestures { player.seekTo(m.positionMs); player.play() } }, maxLines = 2)
+                                TextButton(onClick = { loopA = m.positionMs; if (loopB in 0..loopA) loopB = -1 }) { Text("A") }
+                                IconButton(onClick = { markerDialog = m }) { Icon(Icons.Default.Edit, "Düzenle") }
+                                IconButton(onClick = { vm.deleteMarker(m.id) }) { Icon(Icons.Default.Delete, "Sil") }
+                            }
+                        }
                     }
+                    if (v != null && (v.description.isNotBlank() || v.tags.isNotBlank())) {
+                        item {
+                            Text("Açıklama", fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 6.dp))
+                            if (v.description.isNotBlank()) Text(v.description, fontSize = 14.sp)
+                            if (v.tags.isNotBlank()) Text(Tr.splitTags(v.tags).joinToString("  ") { "#$it" }, fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
+                        }
+                    }
+                    // Sıradaki videolar
+                    if (playlist.size > 1) {
+                        item {
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp)) {
+                                Text("🎬 Bu türkünün videoları (${currentIndex + 1}/${playlist.size})", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                                Text("Otomatik geç", fontSize = 12.sp)
+                                Switch(checked = autoNext, onCheckedChange = { autoNext = it }, modifier = Modifier.padding(start = 4.dp))
+                            }
+                        }
+                        items(playlist, key = { "p" + it.id }) { pv ->
+                            VideoCard(pv, onClick = { if (pv.id != videoId) switchTo(pv) }, isPlaying = pv.id == videoId,
+                                modifier = Modifier.animateItem(),
+                                onOrderChange = { vm.setVideoOrderTag(pv.id, it) }, orderSuggestion = nextOrderSuggestion(playlist))
+                        }
+                    }
+                    item { Spacer(Modifier.height(30.dp)) }
                 }
-                item { Spacer(Modifier.height(30.dp)) }
+                }
             }
         }
     }

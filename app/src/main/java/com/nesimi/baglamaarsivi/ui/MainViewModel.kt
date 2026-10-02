@@ -664,6 +664,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     var playerSpeed: Float
         get() = prefs.getFloat("oynatma_hizi", 1f)
         set(v) { prefs.edit().putFloat("oynatma_hizi", v).apply() }
+    var notesLeft: Boolean
+        get() = prefs.getBoolean("nota_solda", false)
+        set(v) { prefs.edit().putBoolean("nota_solda", v).apply() }
     var loopGapSec: Int
         get() = prefs.getInt("dongu_bekleme", 0)
         set(v) { prefs.edit().putInt("dongu_bekleme", v).apply() }
