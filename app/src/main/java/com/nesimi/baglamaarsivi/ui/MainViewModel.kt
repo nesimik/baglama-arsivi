@@ -637,7 +637,39 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    // ---------------------------------------------------------------- Akort aleti
+    val tuner = com.nesimi.baglamaarsivi.util.Tuner()
+    private val _tuning = MutableStateFlow<com.nesimi.baglamaarsivi.util.PitchReading?>(null)
+    val tuning: StateFlow<com.nesimi.baglamaarsivi.util.PitchReading?> = _tuning.asStateFlow()
+    private val _tunerOn = MutableStateFlow(false)
+    val tunerOn: StateFlow<Boolean> = _tunerOn.asStateFlow()
+    private val _refA4 = MutableStateFlow(prefs.getInt("akort_la", 440))
+    val refA4: StateFlow<Int> = _refA4.asStateFlow()
+
+    init {
+        tuner.referenceA4 = _refA4.value.toDouble()
+        tuner.onReading = { r -> if (r != null || _tuning.value != null) _tuning.value = r }
+    }
+
+    fun setRefA4(v: Int) {
+        val x = v.coerceIn(415, 466)
+        _refA4.value = x; tuner.referenceA4 = x.toDouble()
+        prefs.edit().putInt("akort_la", x).apply()
+    }
+
+    fun startTuner() { if (metronome.isRunning) toggleMetronome(); tuner.start(); _tunerOn.value = true }
+    fun stopTuner() { tuner.stop(); _tunerOn.value = false; _tuning.value = null }
+
+    // ---------------------------------------------------------------- Oynatıcı tercihleri
+    var playerSpeed: Float
+        get() = prefs.getFloat("oynatma_hizi", 1f)
+        set(v) { prefs.edit().putFloat("oynatma_hizi", v).apply() }
+    var loopGapSec: Int
+        get() = prefs.getInt("dongu_bekleme", 0)
+        set(v) { prefs.edit().putInt("dongu_bekleme", v).apply() }
+
     override fun onCleared() {
+        tuner.stop()
         metronome.stop()
         super.onCleared()
     }

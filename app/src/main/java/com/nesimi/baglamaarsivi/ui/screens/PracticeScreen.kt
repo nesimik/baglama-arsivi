@@ -8,6 +8,8 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -20,6 +22,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Remove
@@ -101,8 +104,12 @@ fun PracticeScreen(vm: MainViewModel) {
                 StatTile("🔥 ${stats.streakDays}", "Gün seri", Modifier.weight(1f), color = Color(0xFFE0571B))
             }
         }
+        // Son 7 gün
+        item { WeekChart(sessions) }
         // Süre tutucu (ileri / geri sayım)
         item { TimerCard(vm, names) }
+        // Akort aleti
+        item { TunerCard(vm) }
         // Metronom
         item {
             Card(shape = RoundedCornerShape(18.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
@@ -327,4 +334,111 @@ fun PracticeFinishDialog(vm: MainViewModel) {
         confirmButton = { Button(onClick = { vm.savePractice(note.trim()) }) { Text("Kaydet") } },
         dismissButton = { TextButton(onClick = { vm.discardPractice() }) { Text("Kaydetme") } }
     )
+}
+
+
+/** Son 7 günün çalışma süreleri (basit çubuk grafik). */
+@Composable
+private fun WeekChart(sessions: List<com.nesimi.baglamaarsivi.data.PracticeSession>) {
+    val days = remember(sessions) {
+        val cal = java.util.Calendar.getInstance()
+        val list = mutableListOf<Pair<String, Long>>()
+        val names = arrayOf("Pz", "Pt", "Sa", "Ça", "Pe", "Cu", "Ct")
+        cal.add(java.util.Calendar.DAY_OF_YEAR, -6)
+        repeat(7) {
+            val key = Tr.dayKey(cal.timeInMillis)
+            val sec = sessions.filter { Tr.dayKey(it.startedAt) == key }.sumOf { it.durationSec }
+            list += names[cal.get(java.util.Calendar.DAY_OF_WEEK) - 1] to sec
+            cal.add(java.util.Calendar.DAY_OF_YEAR, 1)
+        }
+        list
+    }
+    val max = (days.maxOfOrNull { it.second } ?: 0L).coerceAtLeast(600L)
+    Card(shape = RoundedCornerShape(18.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+        Column(Modifier.padding(16.dp).fillMaxWidth()) {
+            Text("📊 Son 7 gün", fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(10.dp))
+            Row(Modifier.fillMaxWidth().height(110.dp), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.Bottom) {
+                days.forEachIndexed { i, (label, sec) ->
+                    val today = i == days.lastIndex
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Bottom, modifier = Modifier.weight(1f).fillMaxHeight()) {
+                        if (sec > 0) Text("${sec / 60}", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Box(
+                            Modifier.width(18.dp)
+                                .height((70f * sec / max).coerceAtLeast(if (sec > 0) 4f else 2f).dp)
+                                .clip(RoundedCornerShape(topStart = 6.dp, topEnd = 6.dp))
+                                .background(if (today) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.primary.copy(alpha = 0.45f))
+                        )
+                        Text(label, fontSize = 11.sp, fontWeight = if (today) FontWeight.Bold else FontWeight.Normal)
+                    }
+                }
+            }
+            Text("dakika", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+/** Kromatik akort aleti kartı (mikrofon). */
+@Composable
+private fun TunerCard(vm: MainViewModel) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val on by vm.tunerOn.collectAsStateWithLifecycle()
+    val reading by vm.tuning.collectAsStateWithLifecycle()
+    val ref by vm.refA4.collectAsStateWithLifecycle()
+    val micLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
+    ) { granted -> if (granted) vm.startTuner() else vm.toast("Mikrofon izni verilmedi; akort çalışamaz.") }
+    androidx.compose.runtime.DisposableEffect(Unit) { onDispose { vm.stopTuner() } }
+
+    Card(shape = RoundedCornerShape(18.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+        Column(Modifier.padding(16.dp).fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("🎚️ Akort", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                Text("La = $ref Hz", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                IconButton(onClick = { vm.setRefA4(ref - 1) }) { Icon(Icons.Default.Remove, "Referansı düşür") }
+                IconButton(onClick = { vm.setRefA4(ref + 1) }) { Icon(Icons.Default.Add, "Referansı yükselt") }
+            }
+            val r = reading
+            val cents = r?.cents ?: 0
+            val inTune = r != null && kotlin.math.abs(cents) <= 5
+            val color = when {
+                r == null -> MaterialTheme.colorScheme.onSurfaceVariant
+                inTune -> Color(0xFF2E9D4F)
+                kotlin.math.abs(cents) <= 15 -> Color(0xFFF59E0B)
+                else -> Color(0xFFE0571B)
+            }
+            Text(if (r == null) (if (on) "Teli çal…" else "—") else r.noteName, fontSize = 52.sp, fontWeight = FontWeight.ExtraBold, color = color)
+            Text(
+                if (r == null) "" else "${r.letter}${r.octave}  •  ${"%.1f".format(r.frequency)} Hz  •  ${if (cents > 0) "+" else ""}$cents sent",
+                fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.height(10.dp))
+            // Gösterge: ortadaki çizgi = tam akort
+            androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxWidth().height(28.dp)) {
+                val w = maxWidth
+                Box(Modifier.align(Alignment.Center).fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)).background(MaterialTheme.colorScheme.surfaceVariant))
+                Box(Modifier.align(Alignment.Center).width(3.dp).height(24.dp).background(Color(0xFF2E9D4F)))
+                if (r != null) {
+                    val x = w / 2 + (w / 2 - 8.dp) * (cents / 50f)
+                    Box(Modifier.offset(x = x - 7.dp).align(Alignment.CenterStart).size(14.dp).clip(CircleShape).background(color))
+                }
+            }
+            Row(Modifier.fillMaxWidth()) {
+                Text("♭ pes", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+                Text(if (inTune) "✓ Akortlu" else "", fontSize = 12.sp, color = Color(0xFF2E9D4F), fontWeight = FontWeight.Bold)
+                Text("tiz ♯", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f), textAlign = androidx.compose.ui.text.style.TextAlign.End)
+            }
+            Spacer(Modifier.height(8.dp))
+            Button(onClick = {
+                if (on) vm.stopTuner()
+                else if (androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) vm.startTuner()
+                else micLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+            }, modifier = Modifier.height(46.dp)) {
+                Icon(if (on) Icons.Default.Stop else Icons.Default.Mic, null); Spacer(Modifier.width(4.dp))
+                Text(if (on) "Akortu kapat" else "Akort et (mikrofon)")
+            }
+            Text("Teli tek tek çal; nota adı ve iğne ortadaki yeşil çizgiye gelince tel akortludur.", fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 6.dp))
+        }
+    }
 }

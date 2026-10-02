@@ -155,7 +155,8 @@ fun PlayerScreen(vm: MainViewModel, startVideoId: Long) {
     var isPlaying by remember { mutableStateOf(false) }
     var position by remember { mutableLongStateOf(0L) }
     var duration by remember { mutableLongStateOf(0L) }
-    var speed by remember { mutableFloatStateOf(1f) }
+    var speed by remember { mutableFloatStateOf(vm.playerSpeed) } // son kullanılan hız hatırlanır
+    var loopGap by remember { mutableIntStateOf(vm.loopGapSec) }
     var mirror by remember { mutableStateOf(false) }
     val configuration = androidx.compose.ui.platform.LocalConfiguration.current
     val fullscreen = configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
@@ -256,6 +257,12 @@ fun PlayerScreen(vm: MainViewModel, startVideoId: Long) {
             if (loopOn && loopA >= 0 && loopB > loopA && position >= loopB) {
                 player.seekTo(loopA)
                 loopCount++
+                if (loopGap > 0 && player.isPlaying) {
+                    // Tekrarlar arasında bekle: hocanın ardından kendin çalabilmen için
+                    player.pause()
+                    delay(loopGap * 1000L)
+                    if (loopOn) player.play()
+                }
             }
             tick++
             if (tick % 100 == 0 && player.isPlaying) saveProgress() // ~5 sn
@@ -268,6 +275,16 @@ fun PlayerScreen(vm: MainViewModel, startVideoId: Long) {
         if (controlsVisible && isPlaying && !seeking) {
             delay(3500)
             controlsVisible = false
+        }
+    }
+
+    // Oynatıcıda üst şerit siyah: saat/pil simgeleri beyaz olsun; çıkınca temaya dön
+    val appDark = com.nesimi.baglamaarsivi.ui.theme.LocalIsDark.current
+    DisposableEffect(Unit) {
+        val act = activity
+        if (act != null) WindowCompat.getInsetsController(act.window, act.window.decorView).isAppearanceLightStatusBars = false
+        onDispose {
+            if (act != null) WindowCompat.getInsetsController(act.window, act.window.decorView).isAppearanceLightStatusBars = !appDark
         }
     }
 
@@ -342,7 +359,7 @@ fun PlayerScreen(vm: MainViewModel, startVideoId: Long) {
         }
     }
 
-    fun setSpeed(s: Float) { speed = s; player.playbackParameters = PlaybackParameters(s) }
+    fun setSpeed(s: Float) { speed = s; vm.playerSpeed = s; player.playbackParameters = PlaybackParameters(s) }
     fun poke() { controlsVisible = true; interaction++ }
 
     // ---------------------------------------------------------------- Video alanı
@@ -415,7 +432,7 @@ fun PlayerScreen(vm: MainViewModel, startVideoId: Long) {
             }
             if (controlsVisible) {
                 Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.35f))) {
-                    Row(Modifier.fillMaxWidth().align(Alignment.TopStart).then(if (fullscreen) Modifier else Modifier.statusBarsPadding()), verticalAlignment = Alignment.CenterVertically) {
+                    Row(Modifier.fillMaxWidth().align(Alignment.TopStart), verticalAlignment = Alignment.CenterVertically) {
                         IconButton(onClick = { if (fullscreen) lockedTo = 1 else vm.back() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Geri", tint = Color.White) }
                         Text(v?.title ?: "", color = Color.White, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                         IconButton(onClick = { mirror = !mirror; poke() }) { Icon(Icons.Default.Flip, "Ayna", tint = if (mirror) FavGold else Color.White) }
@@ -467,7 +484,10 @@ fun PlayerScreen(vm: MainViewModel, startVideoId: Long) {
         videoBox(Modifier.fillMaxSize())
     } else {
         Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-            videoBox(Modifier.fillMaxWidth().aspectRatio(16f / 9f))
+            // Dikey modda video durum çubuğunun altına girmesin: üstte siyah şerit + saat/pil görünür
+            Box(Modifier.fillMaxWidth().background(Color.Black).statusBarsPadding()) {
+                videoBox(Modifier.fillMaxWidth().aspectRatio(16f / 9f))
+            }
             LazyColumn(contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 // Başlık
                 item {
@@ -515,6 +535,13 @@ fun PlayerScreen(vm: MainViewModel, startVideoId: Long) {
                                 })
                             }
                             Text("Zor bir pasajı sürekli tekrarlat: başlangıçta A'ya, bitişte B'ye bas.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) {
+                                Text("Tekrar arası bekle:", fontSize = 12.sp, modifier = Modifier.padding(end = 6.dp))
+                                listOf(0, 2, 4, 8).forEach { g ->
+                                    FilterChip(selected = loopGap == g, onClick = { loopGap = g; vm.loopGapSec = g },
+                                        label = { Text(if (g == 0) "Yok" else "$g sn", fontSize = 12.sp) }, modifier = Modifier.padding(end = 4.dp))
+                                }
+                            }
                             Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 6.dp)) {
                                 AssistChip(onClick = { loopA = player.currentPosition; if (loopB in 0..loopA) loopB = -1 }, label = { Text(if (loopA >= 0) "A: ${Tr.duration(loopA)}" else "A noktası") })
                                 AssistChip(onClick = {

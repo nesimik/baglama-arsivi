@@ -88,6 +88,9 @@ fun HomeScreen(vm: MainViewModel) {
                     .background(Brush.linearGradient(listOf(Amber, WoodMedium))).padding(18.dp)
             ) {
                 Column {
+                    val hour = remember { java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY) }
+                    val greet = when (hour) { in 5..11 -> "Günaydın ☀️"; in 12..17 -> "İyi günler 🎶"; in 18..22 -> "İyi akşamlar 🌙"; else -> "İyi geceler ✨" }
+                    Text(greet, color = Color.White.copy(alpha = 0.9f), fontSize = 13.sp)
                     Text("Bağlama Arşivi", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.ExtraBold)
                     Text("Türkülerin, ders videoların ve notaların", color = Color.White.copy(alpha = 0.85f), fontSize = 13.sp)
                     Spacer(Modifier.height(14.dp))

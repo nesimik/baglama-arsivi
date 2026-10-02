@@ -215,7 +215,9 @@ fun TurkuDetailScreen(vm: MainViewModel, turkuId: Long) {
                     val suggestion = nextOrderSuggestion(videos)
                     val groups = videos.groupBy { VideoOrder.section(it.displayOrderTag) }
                     groups.forEach { (section, list) ->
-                        item(key = "h$section") { GroupHeader(section, list.size, Modifier.animateItem()) }
+                        item(key = "h$section") {
+                            GroupHeader(section, list.size, Modifier.animateItem(), onPlay = if (selectionMode) null else ({ vm.navigate(Screen.Player(list.first().id)) }))
+                        }
                         items(list, key = { it.id }) { v ->
                             VideoCard(
                                 v,
@@ -370,7 +372,7 @@ fun nextOrderSuggestion(videos: List<VideoItem>): String {
 }
 
 @Composable
-fun GroupHeader(section: Int?, count: Int, modifier: Modifier = Modifier) {
+fun GroupHeader(section: Int?, count: Int, modifier: Modifier = Modifier, onPlay: (() -> Unit)? = null) {
     val dark = com.nesimi.baglamaarsivi.ui.theme.LocalIsDark.current
     val style = com.nesimi.baglamaarsivi.util.SectionColors.forSection(section, dark)
     Row(modifier.fillMaxWidth().padding(top = 10.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -379,6 +381,12 @@ fun GroupHeader(section: Int?, count: Int, modifier: Modifier = Modifier) {
         Text(if (section == null) "Numarasız" else "${section}. Bölüm", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
         Text("  •  $count video", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         if (section == null) Text("  (numara ver, yerine geçsin)", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.weight(1f))
+        if (onPlay != null) {
+            androidx.compose.material3.TextButton(onClick = onPlay, contentPadding = PaddingValues(horizontal = 8.dp)) {
+                Icon(Icons.Default.PlayArrow, null, Modifier.size(18.dp)); Text("Bölümü izle", fontSize = 12.sp)
+            }
+        }
     }
 }
 

@@ -82,6 +82,17 @@ class MainActivity : ComponentActivity() {
                 AppThemeMode.DARK -> true
                 AppThemeMode.LIGHT -> false
             }
+            // Durum çubuğu (saat, pil…) simgeleri uygulamanın temasına göre koyu/açık olsun ki her zaman görünsün
+            androidx.compose.runtime.DisposableEffect(dark) {
+                val transparent = android.graphics.Color.TRANSPARENT
+                enableEdgeToEdge(
+                    statusBarStyle = if (dark) androidx.activity.SystemBarStyle.dark(transparent)
+                        else androidx.activity.SystemBarStyle.light(transparent, transparent),
+                    navigationBarStyle = if (dark) androidx.activity.SystemBarStyle.dark(transparent)
+                        else androidx.activity.SystemBarStyle.light(transparent, transparent)
+                )
+                onDispose {}
+            }
             BaglamaTheme(dark) { AppRoot(vm) }
         }
     }
